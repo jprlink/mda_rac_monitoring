@@ -5,32 +5,118 @@ library(lubridate)
 library(writexl)
 library(readxl)
 library(deeplr)
+source("functions.R")
 #library(devtools)
 #install_github("impact-initiatives/cleaninginspectoR")
 
 #### Data cleaning ####
+data <- read_xlsx("input/raw_data.xlsx") %>% rename(uuid = "_uuid")
+names(data) <- names(data) %>% str_replace_all(c("/"=".")) %>% tolower()
 
-data <- read_xlsx("input/pre_cleaned_data.xlsx") %>% rename(uuid = "_uuid")
+#data <- read_xlsx("input/pre_cleaned_data.xlsx") %>% rename(uuid = "_uuid")
 survey <- read_xlsx("input/tool.xlsx")
+survey$name <- tolower(survey$name)
 
-# add dummy disaggreation level
-data$disag <- "total"
+# delete surveys without consent
+data  <- data  %>% filter(consent == "yes")
+
+# check for duplicated uuids
+cleaninginspectoR::find_duplicates(data, duplicate.column.name = "uuid")
+data <- data %>% filter(!duplicated(uuid))
+
+# shows surveys for the same center (it should only be one per center)
+sum(duplicated(data$centre_id))
+dup_centre_id <- data$centre_id[duplicated(data$centre_id)]
+data <- data %>% mutate(CHECK_dup_center_id = case_when(centre_id %in% dup_centre_id ~ "Duplicated centre ID"))
+
+# check time
+# Initializing variables
+time_min <- 5
+time_max <- NA
+
+# declaring the function
+time_check <- function(df, time_min, time_max){
+  df <- df %>% mutate(interview_duration = difftime(as.POSIXct(ymd_hms(end)), as.POSIXct(ymd_hms(start)), units = "mins"),
+                      CHECK_interview_duration = case_when(
+                        interview_duration < time_min ~ "Interview time less than five minutes"
+                        #interview_duration > time_max ~ "Interview time too long",
+                      )
+  )
+  return(df)
+}
+
+# Applying the function to data frame
+data <- time_check(data , time_min, time_max)
+
+# Don't check time when the center doesnt need anything.
+data$CHECK_interview_duration[which(data$need_center == "no")] <- NA
+
+sum(data$CHECK_interview_duration == "Interview time less than five minutes", na.rm = T)
+boxplot(data$interview_duration)
+
+# check for outliers
+cleaninginspectoR::find_outliers(data) %>% filter(!variable %in% "centre_id")
+
+# check for logical inconsistencies between number of people needing items and people at center
+data <- data  %>% mutate(CHECK_number_people_items = case_when(center_need_sleeping_item_unit > center_ind | 
+                                                                 center_need_clothes_unit > center_ind |
+                                                                 center_need_older_pwd_item_unit > center_ind ~ "Number of people in need exceeding number of people at centre"
+                                                               )
+)
+
+sum(data$CHECK_number_people_items == "Number of people in need exceeding number of people at centre", na.rm = T)
+#data %>% write_xlsx("output/data_checked.xlsx")
+
+clog_old <- data %>% filter(CHECK_number_people_items == "Number of people in need exceeding number of people at centre") %>% 
+  select(uuid,
+         center_need_sleeping_item_unit,
+         center_need_clothes_unit,
+         center_need_older_pwd_item_unit) %>% 
+  rename("center_need_sleeping_item_unit - OLD" = "center_need_sleeping_item_unit",
+         "center_need_clothes_unit - OLD" = "center_need_clothes_unit",
+         "center_need_older_pwd_item_unit - OLD" = "center_need_older_pwd_item_unit")
+
+# replace number of people estimate when they exceed people at center with number of people at center
+data <- data  %>% mutate(center_need_sleeping_item_unit = case_when(center_need_sleeping_item_unit > center_ind ~  center_ind,
+                                                                    TRUE ~ center_need_sleeping_item_unit),
+                         center_need_clothes_unit = case_when(center_need_clothes_unit > center_ind ~  center_ind,
+                                                              TRUE ~ center_need_clothes_unit),
+                         center_need_older_pwd_item_unit = case_when(center_need_older_pwd_item_unit > center_ind ~ center_ind,
+                                                                     TRUE ~ center_need_older_pwd_item_unit)
+)
+
+clog_new <- data %>% filter(CHECK_number_people_items == "Number of people in need exceeding number of people at centre") %>% 
+  select(uuid,
+         center_need_sleeping_item_unit,
+         center_need_clothes_unit,
+         center_need_older_pwd_item_unit) %>% 
+  rename("center_need_sleeping_item_unit - NEW" = "center_need_sleeping_item_unit",
+         "center_need_clothes_unit - NEW" = "center_need_clothes_unit",
+         "center_need_older_pwd_item_unit - NEW" = "center_need_older_pwd_item_unit")
+
+clog_logical <- left_join(clog_old, clog_new, by = "uuid")
+clog_logical %>% write_xlsx(paste0("output/clog_logical_", Sys.Date(), ".xlsx"))
 
 # exclude survey questions not included in data
-survey <- survey %>% filter(`label::English` %in% names(data))
+survey <- survey %>% filter(name %in% names(data))
 
 # define question types
-questions_so <- survey$`label::English`[grepl("select_one", survey$type)]
-questions_sm <- survey$`label::English`[grepl("select_multiple", survey$type)]
-questions_text <- survey$`label::English`[grepl("text", survey$type)]
-questions_int <- survey$`label::English`[grepl("integer", survey$type)]
+questions_so <- survey$name[grepl("select_one", survey$type)]
+questions_sm <- survey$name[grepl("select_multiple", survey$type)]
+questions_text <- survey$name[grepl("text", survey$type)]
+questions_int <- survey$name[grepl("integer", survey$type)] %>% append(c("calc_ukrainian","calc_third_party"))
 questions_cat <- append(questions_so, questions_sm)
 questions_num <- append(questions_int, questions_sm)
-questions_other <- grep("If other, please specify|If not, may I ask you why", names(data), value = T)
+questions_other <- grep("_specify|_explain_why|_other", names(data), value = T)
 
 # make sure that all integer columns are numerical and text and categoricals character
 data[questions_int] <- lapply(data[questions_int], as.numeric)
 data[c(questions_cat, questions_other)] <- lapply(data[c(questions_cat, questions_other)], as.character)
+
+questions_int_no_age <- questions_int[!questions_int %in% c("child_0_2_number", "child_2_6_number", "child_7_11_number", "child_12_18_number", "demo_elderly", "how_many_are_children_2_18_years_old")]
+
+# replace NAs with 0s in integer vars
+data[questions_int_no_age][is.na(data[questions_int_no_age])] <- 0
 
 # exclude 0s from categorical columns
 data[c(questions_cat, questions_text)][data[c(questions_cat, questions_text)]== "0"] <- NA_character_
@@ -88,7 +174,7 @@ other_data_long$translation <- translate2(
   auth_key = my_key
 )
 
-other_data_long
+other_data_long %>% write_xlsx(paste0("output/other_response_translations_", Sys.Date(), ".xlsx"))
 
 for (i in 1:nrow(data)) {
   for(c in 1:ncol(data)) {
@@ -106,194 +192,70 @@ for (i in 1:nrow(data)) {
 
 data[c("uuid",questions_other)]
 
-# exclude colums with only NAs
-data <- data[, colSums(is.na(data)) != nrow(data)]
-
-# replace NAs with 0s in integer vars
-data[questions_int][is.na(data[questions_int])] <- 0
-
 # set NA for staff when number of staff 0 and there are people hosted
-data$`How many staff does the centre currently have?`[which(data$`How many staff does the centre currently have?` == 0 &
-                                                              data$`How many people are currently being hosted at the centre?` > 0 )] <- NA_integer_
+data$how_many_staff_does_entre_currently_have[which(data$how_many_staff_does_entre_currently_have == 0 &
+                                                              data$center_ind > 0 )] <- NA_integer_
 
 # calculate number of staff per hosted person
-data <- data %>% mutate(`How many staff per people hosted?` = `How many staff does the centre currently have?` / `How many people are currently being hosted at the centre?`)
-data["How many staff per people hosted?"][data["How many staff per people hosted?"] == Inf] <- NA
-data["How many staff per people hosted?"][data["How many staff per people hosted?"] == NaN] <- NA
-questions_int <- append(questions_int, "How many staff per people hosted?")
+data <- data %>% mutate(how_many_staff_per_people_hosted = how_many_staff_does_entre_currently_have / center_ind)
+data["how_many_staff_per_people_hosted"][data["how_many_staff_per_people_hosted"] == Inf] <- NA
+data["how_many_staff_per_people_hosted"][data["how_many_staff_per_people_hosted"] == NaN] <- NA
+questions_int <- append(questions_int, "how_many_staff_per_people_hosted")
 
 # add 0s and no so that overall % of centers per need status is calculated
-vars_set_no <- c("Does this center need food products?",
-                 "Has the centre received any food products since receiving approval to open?",
-                 "Does this center need cooking and eating utensils?",
-                 "Has the centre received any cooking and eating utensils since receiving approval to open?",  
-                 "Does this center need sleeping items?", 
-                 "Has the centre received any sleeping items since receiving approval to open?",
-                 "Does this center need hygiene (personal care) items?",
-                 "Has the centre received any  hygiene (personal care) items since receiving approval to open?",
-                 "Does this center need cleaning items?",
-                 "Has the centre received any cleaning items since receiving approval to open?",
-                 "Does this center need baby and children products?",
-                 "Has the centre received any baby and children products since receiving approval to open?",
-                 "Does this center need clothes for children and adults?",
-                 "Has the centre received any clothes for children and adults since receiving approval to open?",
-                 "Does this center need first aid supplies?",
-                 "Has the centre received any first aid supplies since receiving approval to open?",
-                 "Does this center need supplies for people of age and people with disabilities?",
-                 "Has the centre received any supplies for  people of age and people with disabilities since receiving approval to open?",
-                 "Does this center need other appliances (Microwave, cooler, fridge, oven, speace heaters, boilers, washing machine, vacuum cleaner)?",
-                 "Has the centre received any other appliances since receiving approval to open?"
-)
-
-vars_set_zero_temp <- c("If yes, which type of of food products does the center need?",
-                        "If yes, which type of of food products has the center received?",
-                        "If yes, which type of cooking and eating utensils does the center need?",
-                        "If yes, which type of cooking and eating utensils has the center received?",
-                        "If yes, which type of sleeping items does the center need?",
-                        "If yes, which type of sleeping items has the center received?",
-                        "If yes, which type of hygiene (personal care) items does the center need?",
-                        "If yes, which type of hygiene (personal care) items has the center received?",
-                        "If yes, which type of cleaning items does the center need?",
-                        "If yes, which type of cleaning items has the center received?",
-                        "If yes, which type of baby and children products does the center need?",
-                        "If yes, which type of baby and children products has the center received?",
-                        "If yes, which type of clothes for children and adults does the center need?",
-                        "If yes, which type of clothes for children and adults has the center received?",
-                        "If yes, which type of first aid supplies does the center need?",
-                        "If yes, which type of first aid supplies has the center received?",
-                        "If yes, which type of supplies for people of age and people with disabilities does the center need?",
-                        "If yes, which type of supplies for people of age and people with disabilities has the center received?",
-                        "If yes, which type of other appliances does the center need?",
-                        "If yes, which type of appliances has the center received?"
-)
+vars_set_overall <- survey$name[which(survey$change_to_overall_percent == "yes")]
+vars_set_no <- vars_set_overall[vars_set_overall %in% questions_so]
+vars_set_zero_temp <- vars_set_overall[vars_set_overall %in% questions_sm]
 
 vars_set_zero <- data %>% select(contains(vars_set_zero_temp)) %>% names
-vars_set_zero <- vars_set_zero[!vars_set_zero %in% questions_cat]
-data[vars_set_no][is.na(data[, vars_set_no])] <- "No"
+vars_set_zero <- vars_set_zero[!vars_set_zero %in% c(questions_sm, questions_other)]
+data[vars_set_no][is.na(data[, vars_set_no])] <- "no"
 data[vars_set_zero ][is.na(data[, vars_set_zero ])] <- 0
 
-# delete surveys without consent
-data  <- data  %>% filter(`My name is ${enumerator} and I am working with ANAS (National Agency for Social Assistance). We are in charge of conducting an assessment on the Refugee Accommodation Centers (RAC) in Moldova. The information you provide will help to inform the assistance that is provided to centers across Moldova. Today, the interview will last a bit longer, around 15 minutes, because we are gathering detailed information about the needs of the centers. The information you provide will only be shared in a strictly anonymized format. Your participation is voluntary and you can withdraw from the interview at any point. Do you have any questions? Are you willing to participate to this survey?` == "Yes")
+# add total of children 2-18 where there is a breakdown
+data <- data %>% mutate(how_many_are_children_2_18_years_old = case_when(!is.na(child_2_6_number) ~ child_2_6_number + child_7_11_number + child_12_18_number,
+                                                                          is.na(child_2_6_number)  ~ how_many_are_children_2_18_years_old),
+                         )
+# set NAs for all three age variable when one of them is NA
+vars_age <- c("child_0_2_number", "how_many_are_children_2_18_years_old", "demo_elderly")
+data[vars_age]
+data <- data %>% mutate(set_na_age = case_when(rowSums(across(all_of(vars_age), ~ is.na(.))) > 0 ~"yes"))
+data[which(data$set_na_age == "yes"), vars_age] <- NA
 
-# check for duplicated uuids
-cleaninginspectoR::find_duplicates(data, duplicate.column.name = "uuid")
-data <- data %>% filter(!duplicated(uuid))
-
-# shows surveys for the same center (it should only be one per center)
-cor_centers <- read_xlsx("input/correction_centers.xlsx")
-data <- left_join(data, cor_centers)
-sum(is.na(data$center_new))
-sum(duplicated(data$`Center that is being assessed`))
-data$`Center that is being assessed`[duplicated(data$`Center that is being assessed`)]
-data <- data %>% mutate(`Center that is being assessed` = center_new)
-sum(duplicated(data$`Center that is being assessed`))
-
-# check time
-
-time_missing <- read_xlsx("input/added_times.xlsx")
-data <- data %>% select(-c("today", "start", "end")) %>% left_join(time_missing)
-
-# Initializing variables
-time_min <- 5
-time_max <- NA
-
-# declaring the function
-time_check <- function(df, time_min, time_max){
-  df <- df %>% mutate(interview_duration = difftime(as.POSIXct(ymd_hms(end)), as.POSIXct(ymd_hms(start)), units = "mins"),
-                      CHECK_interview_duration = case_when(
-                        interview_duration < time_min ~ "Too short",
-                        interview_duration > time_max ~ "Too long",
-                        TRUE ~ "Okay"
-                      )
-  )
-  return(df)
-}
-
-# Applying the function to data frame
-data <- time_check(data , time_min, time_max)
-
-# Don't check time when the center doesnt need anything.
-data$CHECK_interview_duration[which(data$`Does this center need anything?` == "No")] <- "Okay"
-
-sum(data$CHECK_interview_duration == "Too short")
-boxplot(data$interview_duration)
-
-# check for outliers
-cleaninginspectoR::find_outliers(data)
-
-# check for logical inconsistencies between number of people needing items and people at center
-data <- data  %>% mutate(CHECK_number_people_items = case_when(`For how many people does the center need sleeping items?` > `How many people are currently being hosted at the centre?` | 
-                                                                   `For how many people does the center need clothes?` > `How many people are currently being hosted at the centre?` |
-                                                                         `For how many older people and PWD does the center need supplies?` > `How many people are currently being hosted at the centre?` ~ "Check",
-                                                               TRUE ~ "Okay")
+# calculate percentages of demographic groups per center
+data <- data %>% mutate(perc_0_2 = child_0_2_number / center_ind,
+                        perc_2_18 = how_many_are_children_2_18_years_old / center_ind,
+                        perc_65_plus = demo_elderly / center_ind,
+                        perc_2_6 = ifelse(!is.na(child_2_6_number), child_2_6_number / how_many_are_children_2_18_years_old, NA),
+                        perc_7_11 = ifelse(!is.na(child_7_11_number), child_7_11_number / how_many_are_children_2_18_years_old, NA),
+                        perc_12_18 = ifelse(!is.na(child_12_18_number), child_12_18_number / how_many_are_children_2_18_years_old, NA)
 )
 
-sum(data$CHECK_number_people_items == "Check")
-data %>% write_xlsx("output/data_checked.xlsx")
-clog_old <- data %>% filter(CHECK_number_people_items == "Check") %>% 
-  select(uuid,
-         `For how many people does the center need sleeping items?`,
-         `For how many people does the center need clothes?`,
-         `For how many older people and PWD does the center need supplies?`) %>% 
-  rename("For how many people does the center need sleeping items? - OLD" = "For how many people does the center need sleeping items?",
-         "For how many people does the center need clothes? - OLD" = "For how many people does the center need clothes?",
-         "For how many older people and PWD does the center need supplies? - OLD" = "For how many older people and PWD does the center need supplies?")
+# export clean dataset with checks and without excluded variables
+data %>% 
+  select(CHECK_interview_duration, CHECK_number_people_items, CHECK_dup_center_id, uuid, c(1:ncol(data))) %>%
+  write_xlsx(paste0("output/MDA_RAC_data_clean_NOT_for_sharing_with_checks_", Sys.Date(), ".xlsx"))
 
-# replace number of people estimate when they exceed people at center with number of people at center
-data <- data  %>% mutate(`For how many people does the center need sleeping items?` = case_when(`For how many people does the center need sleeping items?` > `How many people are currently being hosted at the centre?` ~  `How many people are currently being hosted at the centre?`,
-                                                                 TRUE ~ `For how many people does the center need sleeping items?`),
-                         `For how many people does the center need clothes?` = case_when(`For how many people does the center need clothes?` > `How many people are currently being hosted at the centre?` ~  `How many people are currently being hosted at the centre?`,
-                                                                 TRUE ~ `For how many people does the center need clothes?`),
-                         `For how many older people and PWD does the center need supplies?` = case_when(`For how many older people and PWD does the center need supplies?` > `How many people are currently being hosted at the centre?` ~ `How many people are currently being hosted at the centre?`,
-                                                               TRUE ~ `For how many older people and PWD does the center need supplies?`)
-)
+# exclude not needed variables
+vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18"))
+data <- data %>% select(uuid, contains(vars_clean))
 
-clog_new <- data %>% filter(CHECK_number_people_items == "Check") %>% 
-  select(uuid,
-         `For how many people does the center need sleeping items?`,
-         `For how many people does the center need clothes?`,
-         `For how many older people and PWD does the center need supplies?`) %>% 
-  rename("For how many people does the center need sleeping items? - NEW" = "For how many people does the center need sleeping items?",
-         "For how many people does the center need clothes? - NEW" = "For how many people does the center need clothes?",
-         "For how many older people and PWD does the center need supplies? - NEW" = "For how many older people and PWD does the center need supplies?")
-
-clog_logical <- left_join(clog_old, clog_new, by = "uuid")
-clog_logical %>% write_xlsx("output/clog_logical.xlsx")
-
-# exclude colums with only NAs
-data <- data[, colSums(is.na(data)) != nrow(data)]
-
-# exclude sensitive/not-needed columns
-cols_exclude <- c("start", 
-                  "end", 
-                  "deviceid",	
-                  "audit",	
-                  "audit_URL",	
-                  "Enumerator first name",
-                  "Name and phone number of the Respondent",
-                  "Center that is being assessed",
-                  "calc2",
-                  "calc3",	
-                  "calc4",	
-                  "calc5",	
-                  "_id",
-                  "_submission_time",	
-                  "_validation_status",	
-                  "_notes",	"_status",	
-                  "_submitted_by",	
-                  "_tags",
-                  "_index",
-                  "__version__",
-                  "_version_",
-                  "_version__001",
-                  "interview_duration",	
-                  "CHECK_interview_duration",	
-                  "CHECK_number_people_items",
-                  "center_new"
-)
-data <- data[!names(data) %in% cols_exclude]
-
-data <- data %>% select(uuid, today, c(1:ncol(data)))
-
-data %>% write_xlsx(paste0("output/MDA_RAC_data_clean_", Sys.Date(), ".xlsx"))
+# export clean dataset without checks
+data %>% write_xlsx(paste0("output/MDA_RAC_data_clean_for_sharing_", Sys.Date(), ".xlsx"))
 data %>% write_xlsx("input/clean_data.xlsx")
+
+# export clean dataset with labels
+data_en <- from_xml_tolabel(db = data,
+                         choices = choices,
+                         survey = survey,
+                         choices_label = "label::English",
+                         survey_label = "label::English")
+
+data_ro <- from_xml_tolabel(db = data,
+                            choices = choices,
+                            survey = survey,
+                            choices_label = "label::Romanian",
+                            survey_label = "label::Romanian")
+
+data_en %>% write_xlsx(paste0("output/MDA_RAC_data_clean_for_sharing_labelled_EN_", Sys.Date(), ".xlsx"))
+data_ro %>% write_xlsx(paste0("output/MDA_RAC_data_clean_for_sharing_labelled_RO_", Sys.Date(), ".xlsx"))
