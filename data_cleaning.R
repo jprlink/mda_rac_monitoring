@@ -5,19 +5,65 @@ library(lubridate)
 library(writexl)
 library(readxl)
 library(deeplr)
+library(assertthat)
 source("functions.R")
 #library(devtools)
 #install_github("impact-initiatives/cleaninginspectoR")
 
 #### Data cleaning ####
+
+# load data
 data <- read_xlsx("input/raw_data.xlsx") %>% rename(uuid = "_uuid")
 names(data) <- names(data) %>% str_replace_all(c("/"=".")) %>% tolower()
 
-#data <- read_xlsx("input/pre_cleaned_data.xlsx") %>% rename(uuid = "_uuid")
-survey <- read_xlsx("input/tool.xlsx")
-survey$name <- tolower(survey$name)
+raw_data <- data
 
-# delete surveys without consent
+# load tool
+survey <- read_xlsx("input/tool.xlsx") %>% 
+  mutate(tolower(name)) %>% 
+  filter(name %in% names(data))
+choices <- read_xlsx("input/tool.xlsx", 2)
+
+# define question types
+questions_so <- survey$name[grepl("select_one", survey$type)]
+questions_sm <- survey$name[grepl("select_multiple", survey$type)]
+questions_text <- survey$name[grepl("text", survey$type)]
+questions_int <- survey$name[grepl("integer", survey$type)] %>% append(c("calc_ukrainian","calc_third_party"))
+questions_cat <- append(questions_so, questions_sm)
+questions_other <- grep("_specify|_explain_why|_other", names(data), value = T)
+questions_sm_num <- data %>% select(contains(questions_sm) & !any_of(c(questions_sm, questions_other))) %>% names()
+questions_num <- append(questions_int, questions_sm_num)
+
+# make sure that all integer columns are numerical and text and categoricals character
+data[questions_int] <- lapply(data[questions_int], as.numeric)
+data[c(questions_cat, questions_other)] <- lapply(data[c(questions_cat, questions_other)], as.character)
+
+### clean data using cleaning log
+
+clog_change <- read_xlsx("input/cleaning_log.xlsx")
+clog_change <- cleaninglog(clog_change$uuid, 
+                           clog_change$question.name, 
+                           clog_change$new.value,  
+                           clog_change$changed, 
+                             "uuid")
+
+clog_change_cat <- clog_change %>% filter(!variables %in% questions_num)
+clog_change_cat$new_values <- as.character(clog_change_cat$new_values)
+clog_change_num <- clog_change %>% filter(variables %in% questions_num)
+
+clog_deletion <- read_xlsx("input/cleaning_log.xlsx", 2)
+
+# delete surveys based on deletion log
+data <- data %>% filter(!uuid %in% clog_deletion$uuid)
+
+# change values using change log
+data <- clog_clean(data, clog_change_cat)
+data <- clog_clean(data, clog_change_num)
+
+### run checks
+
+# check for surveys without consent
+data  %>% filter(consent != "yes")
 data  <- data  %>% filter(consent == "yes")
 
 # check for duplicated uuids
@@ -77,7 +123,7 @@ clog_old <- data %>% filter(CHECK_number_people_items == "Number of people in ne
          "center_need_older_pwd_item_unit - OLD" = "center_need_older_pwd_item_unit")
 
 # replace number of people estimate when they exceed people at center with number of people at center
-data <- data  %>% mutate(center_need_sleeping_item_unit = case_when(center_need_sleeping_item_unit > center_ind ~  center_ind,
+data2 <- data  %>% mutate(center_need_sleeping_item_unit = case_when(center_need_sleeping_item_unit > center_ind ~  center_ind,
                                                                     TRUE ~ center_need_sleeping_item_unit),
                          center_need_clothes_unit = case_when(center_need_clothes_unit > center_ind ~  center_ind,
                                                               TRUE ~ center_need_clothes_unit),
@@ -85,7 +131,7 @@ data <- data  %>% mutate(center_need_sleeping_item_unit = case_when(center_need_
                                                                      TRUE ~ center_need_older_pwd_item_unit)
 )
 
-clog_new <- data %>% filter(CHECK_number_people_items == "Number of people in need exceeding number of people at centre") %>% 
+clog_new <- data2 %>% filter(CHECK_number_people_items == "Number of people in need exceeding number of people at centre") %>% 
   select(uuid,
          center_need_sleeping_item_unit,
          center_need_clothes_unit,
@@ -97,30 +143,21 @@ clog_new <- data %>% filter(CHECK_number_people_items == "Number of people in ne
 clog_logical <- left_join(clog_old, clog_new, by = "uuid")
 clog_logical %>% write_xlsx(paste0("output/clog_logical_", Sys.Date(), ".xlsx"))
 
-# exclude survey questions not included in data
-survey <- survey %>% filter(name %in% names(data))
+# export clean dataset with checks and without excluded variables
+checks <- data %>% select(CHECK_interview_duration, CHECK_number_people_items, CHECK_dup_center_id, uuid)
+data_checks <- left_join(raw_data, checks, by = "uuid")
+data_checks %>% 
+  write_xlsx(paste0("output/MDA_RAC_raw_data_with_checks_", Sys.Date(), ".xlsx"))
 
-# define question types
-questions_so <- survey$name[grepl("select_one", survey$type)]
-questions_sm <- survey$name[grepl("select_multiple", survey$type)]
-questions_text <- survey$name[grepl("text", survey$type)]
-questions_int <- survey$name[grepl("integer", survey$type)] %>% append(c("calc_ukrainian","calc_third_party"))
-questions_cat <- append(questions_so, questions_sm)
-questions_num <- append(questions_int, questions_sm)
-questions_other <- grep("_specify|_explain_why|_other", names(data), value = T)
-
-# make sure that all integer columns are numerical and text and categoricals character
-data[questions_int] <- lapply(data[questions_int], as.numeric)
-data[c(questions_cat, questions_other)] <- lapply(data[c(questions_cat, questions_other)], as.character)
-
-questions_int_no_age <- questions_int[!questions_int %in% c("child_0_2_number", "child_2_6_number", "child_7_11_number", "child_12_18_number", "demo_elderly", "how_many_are_children_2_18_years_old")]
+### make modifications & additions to data
 
 # replace NAs with 0s in integer vars
+questions_int_no_age <- questions_int[!questions_int %in% c("child_0_2_number", "child_2_6_number", "child_7_11_number", "child_12_18_number", "demo_elderly", "how_many_are_children_2_18_years_old")]
 data[questions_int_no_age][is.na(data[questions_int_no_age])] <- 0
 
-# exclude 0s from categorical columns
-data[c(questions_cat, questions_text)][data[c(questions_cat, questions_text)]== "0"] <- NA_character_
-data[questions_other][data[questions_other]== "0"] <- NA_character_
+# # exclude 0s from categorical columns
+# data[c(questions_cat, questions_text)][data[c(questions_cat, questions_text)]== "0"] <- NA_character_
+# data[questions_other][data[questions_other]== "0"] <- NA_character_
 
 # translate "other" responses 
 
@@ -231,17 +268,19 @@ data <- data %>% mutate(perc_0_2 = child_0_2_number / center_ind,
                         perc_12_18 = ifelse(!is.na(child_12_18_number), child_12_18_number / how_many_are_children_2_18_years_old, NA)
 )
 
-# export clean dataset with checks and without excluded variables
-data %>% 
-  select(CHECK_interview_duration, CHECK_number_people_items, CHECK_dup_center_id, uuid, c(1:ncol(data))) %>%
-  write_xlsx(paste0("output/MDA_RAC_data_clean_NOT_for_sharing_with_checks_", Sys.Date(), ".xlsx"))
+# add building type when building type was already known before
+building_type <- read_xlsx("input/building_type.xlsx") %>% select(-label)
+building_type$centre_id <- as.character(building_type$centre_id )
+data <- left_join(data, building_type, by = "centre_id")
+data  <- data  %>% mutate(what_type_of_building_is_the_c = ifelse(is.na(what_type_of_building_is_the_c), what_type_of_building_is_the_c_new, what_type_of_building_is_the_c))
+data$centre_id[which(is.na(data$what_type_of_building_is_the_c))]
 
 # exclude not needed variables
 vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18"))
 data <- data %>% select(uuid, contains(vars_clean))
 
 # export clean dataset without checks
-data %>% write_xlsx(paste0("output/MDA_RAC_data_clean_for_sharing_", Sys.Date(), ".xlsx"))
+data %>% write_xlsx(paste0("output/MDA_RAC_clean_data_for_sharing_unlabelled_", Sys.Date(), ".xlsx"))
 data %>% write_xlsx("input/clean_data.xlsx")
 
 # export clean dataset with labels
@@ -257,5 +296,5 @@ data_ro <- from_xml_tolabel(db = data,
                             choices_label = "label::Romanian",
                             survey_label = "label::Romanian")
 
-data_en %>% write_xlsx(paste0("output/MDA_RAC_data_clean_for_sharing_labelled_EN_", Sys.Date(), ".xlsx"))
-data_ro %>% write_xlsx(paste0("output/MDA_RAC_data_clean_for_sharing_labelled_RO_", Sys.Date(), ".xlsx"))
+data_en %>% write_xlsx(paste0("output/MDA_RAC_clean_data_for_sharing_labelled_EN_", Sys.Date(), ".xlsx"))
+data_ro %>% write_xlsx(paste0("output/MDA_RAC_clean_data_for_sharing_labelled_RO_", Sys.Date(), ".xlsx"))

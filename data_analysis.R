@@ -9,9 +9,11 @@ library(readxl)
 
 #### Data analysis ####
 
+# load data
 data <- read_xlsx("input/clean_data.xlsx")
 data$disag <- "total" # add dummy strata for analysis
 
+# load tool
 survey <- read_xlsx("input/tool.xlsx") %>% 
   mutate(tolower(name)) %>% 
   filter(name %in% names(data))
@@ -22,11 +24,15 @@ questions_so <- survey$name[grepl("select_one", survey$type)]
 questions_so <- questions_so[!questions_so %in% "centre_id"]
 questions_sm <- survey$name[grepl("select_multiple", survey$type)]
 questions_text <- survey$name[grepl("text", survey$type)]
-questions_int <- survey$name[grepl("integer", survey$type)] %>% append(c("calc_ukrainian","calc_third_party"))
+questions_int <- survey$name[grepl("integer", survey$type)] %>% append(c("calc_ukrainian","calc_third_party",
+                                                                         "how_many_staff_per_people_hosted", 
+                                                                         "perc_0_2",	"perc_2_18",	"perc_65_plus",	
+                                                                         "perc_2_6",	"perc_7_11",	"perc_12_18"
+                                                                         ))
 questions_cat <- append(questions_so, questions_sm)
-questions_num <- append(questions_int, questions_sm)
 questions_other <- grep("_specify|_explain_why|_other", names(data), value = T)
-
+questions_sm_num <- data %>% select(contains(questions_sm) & !any_of(c(questions_sm, questions_other))) %>% names()
+questions_num <- append(questions_int, questions_sm_num)
 
 # define cross-tabulate functions
 getfreq <-function(var,data){
@@ -64,7 +70,7 @@ results_so <- results_so %>%
 
 # calculate select multiple results
 results_sm_wide <- data %>% group_by(disag) %>% 
-  summarize(across(.cols = any_of(contains(questions_sm)), .fns = ~ mean(.x, na.rm = TRUE)))
+  summarize(across(.cols = all_of(questions_sm_num), .fns = ~ mean(.x, na.rm = TRUE)))
 
 results_sm_wide <- results_sm_wide[!names(results_sm_wide) %in% c(questions_cat, questions_other, "disag")]
 
@@ -88,7 +94,9 @@ results_mean <- results_mean_wide %>% pivot_longer(everything(),
 results_sum_wide <- data %>% group_by(disag) %>% 
   summarize(across(.cols = all_of(questions_int), .fns = ~ sum(.x, na.rm = TRUE)))
 
-results_sum_wide <- results_sum_wide[!names(results_sum_wide) %in% c(questions_cat, "How many staff per people hosted?", "disag")]
+results_sum_wide <- results_sum_wide[!names(results_sum_wide) %in% c(questions_cat, "disag", "how_many_staff_per_people_hosted", 
+                                                                         "perc_0_2",	"perc_2_18",	"perc_65_plus",	
+                                                                         "perc_2_6",	"perc_7_11",	"perc_12_18")]
 
 results_sum <- results_sum_wide %>% pivot_longer(everything(),
                                                            names_to = "id",
@@ -134,5 +142,5 @@ results_all_labelled <- results_all_labelled  %>%
   select(id, "Question (EN)", "Question (RO)", "Response (EN)", "Response (RO)", "Type", "Result")
 
 # export results
-results_all_labelled %>% write_xlsx(paste0("output/MDA_RAC_analysis_", Sys.Date(), ".xlsx"))
+results_all_labelled %>% write_xlsx(paste0("output/MDA_RAC_analysis_results_", Sys.Date(), ".xlsx"))
 
