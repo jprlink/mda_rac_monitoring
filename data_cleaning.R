@@ -20,7 +20,7 @@ raw_data <- data
 
 # load tool
 survey <- read_xlsx("input/tool.xlsx") %>% 
-  mutate(tolower(name)) %>% 
+  mutate(name = tolower(name)) %>% 
   filter(name %in% names(data))
 choices <- read_xlsx("input/tool.xlsx", 2)
 
@@ -63,7 +63,7 @@ data <- clog_clean(data, clog_change_num)
 ### run checks
 
 # check for surveys without consent
-data  %>% filter(consent != "yes")
+data  %>% filter(consent != "yes") %>% select(uuid)
 data  <- data  %>% filter(consent == "yes")
 
 # check for duplicated uuids
@@ -253,11 +253,15 @@ data[vars_set_zero ][is.na(data[, vars_set_zero ])] <- 0
 data <- data %>% mutate(how_many_are_children_2_18_years_old = case_when(!is.na(child_2_6_number) ~ child_2_6_number + child_7_11_number + child_12_18_number,
                                                                           is.na(child_2_6_number)  ~ how_many_are_children_2_18_years_old),
                          )
+# add seperate total individual variable for breakdown
+data$center_ind_breakdown <- data$center_ind
+
 # set NAs for all three age variable when one of them is NA
-vars_age <- c("child_0_2_number", "how_many_are_children_2_18_years_old", "demo_elderly")
+vars_age <- c("center_ind_breakdown", "child_0_2_number", "how_many_are_children_2_18_years_old", "demo_elderly")
 data[vars_age]
 data <- data %>% mutate(set_na_age = case_when(rowSums(across(all_of(vars_age), ~ is.na(.))) > 0 ~"yes"))
 data[which(data$set_na_age == "yes"), vars_age] <- NA
+data[vars_age]
 
 # calculate percentages of demographic groups per center
 data <- data %>% mutate(perc_0_2 = child_0_2_number / center_ind,
@@ -276,8 +280,8 @@ data  <- data  %>% mutate(what_type_of_building_is_the_c = ifelse(is.na(what_typ
 data$centre_id[which(is.na(data$what_type_of_building_is_the_c))]
 
 # exclude not needed variables
-vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18"))
-data <- data %>% select(uuid, contains(vars_clean))
+vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "center_ind_breakdown", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18"))
+data <- data %>% select(uuid, contains(vars_clean)) %>% select(-what_type_of_building_is_the_c_new)
 
 # export clean dataset without checks
 data %>% write_xlsx(paste0("output/MDA_RAC_clean_data_for_sharing_unlabelled_", Sys.Date(), ".xlsx"))

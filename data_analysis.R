@@ -13,9 +13,12 @@ library(readxl)
 data <- read_xlsx("input/clean_data.xlsx")
 data$disag <- "total" # add dummy strata for analysis
 
+# exclude empty columns
+data <- data[, colSums(is.na(data)) != nrow(data)]
+
 # load tool
 survey <- read_xlsx("input/tool.xlsx") %>% 
-  mutate(tolower(name)) %>% 
+  mutate(name = tolower(name)) %>% 
   filter(name %in% names(data))
 choices <- read_xlsx("input/tool.xlsx", 2)
   
@@ -25,7 +28,7 @@ questions_so <- questions_so[!questions_so %in% "centre_id"]
 questions_sm <- survey$name[grepl("select_multiple", survey$type)]
 questions_text <- survey$name[grepl("text", survey$type)]
 questions_int <- survey$name[grepl("integer", survey$type)] %>% append(c("calc_ukrainian","calc_third_party",
-                                                                         "how_many_staff_per_people_hosted", 
+                                                                         "how_many_staff_per_people_hosted", "center_ind_breakdown",
                                                                          "perc_0_2",	"perc_2_18",	"perc_65_plus",	
                                                                          "perc_2_6",	"perc_7_11",	"perc_12_18"
                                                                          ))
@@ -136,6 +139,8 @@ question_labels <- question_labels %>%
 question_labels$id <- gsub("select_one |select_multiple ", "", question_labels$id)
 question_choice_labels <- left_join(question_labels, choice_labels, by = "id") %>% select(-id) %>%
   mutate(id = paste0(dependent.var, ".", dependent.var.value))
+
+question_choice_labels$id[which(question_choice_labels$question_type == "integer")] <- question_choice_labels$id[which(question_choice_labels$question_type == "integer")] %>% str_replace_all(c(".NA"=""))
 
 results_all_labelled <- left_join(results_all, question_choice_labels, by = "id") 
 results_all_labelled <- results_all_labelled  %>% 
