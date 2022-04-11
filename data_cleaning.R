@@ -63,17 +63,18 @@ data <- clog_clean(data, clog_change_num)
 ### run checks
 
 # check for surveys without consent
-data  %>% filter(consent != "yes") %>% select(uuid)
-data  <- data  %>% filter(consent == "yes")
+uuids_no_consent <- data$uuid[data$consent != "yes"] %>% print
 
 # check for duplicated uuids
-cleaninginspectoR::find_duplicates(data, duplicate.column.name = "uuid")
-data <- data %>% filter(!duplicated(uuid))
+dup_uuid <- data$uuid[duplicated(data$uuid)] %>% print
 
-# shows surveys for the same center (it should only be one per center)
-sum(duplicated(data$centre_id))
-dup_centre_id <- data$centre_id[duplicated(data$centre_id)]
-data <- data %>% mutate(CHECK_dup_center_id = case_when(centre_id %in% dup_centre_id ~ "Duplicated centre ID"))
+# check for surveys for the same center (it should only be one per center)
+dup_centre_id <- data$centre_id[duplicated(data$centre_id)] %>% print
+
+
+data <- data %>% mutate(CHECK_dup_center_id = case_when(centre_id %in% dup_centre_id ~ "Duplicated centre ID"),
+                        CHECK_no_consent = case_when(uuid %in% uuids_no_consent ~ "No consent")
+                        )
 
 # check time
 # Initializing variables
@@ -101,7 +102,32 @@ sum(data$CHECK_interview_duration == "Interview time less than five minutes", na
 boxplot(data$interview_duration)
 
 # check for outliers
-cleaninginspectoR::find_outliers(data) %>% filter(!variable %in% "centre_id")
+
+# 999 (meaning don't know)
+checks_outlier <- data_frame(index =  NA_integer_,
+                 value = NA_character_,
+                 variable = NA_character_,
+                 has_issue = NA,                  
+                 issue_type = NA_character_,
+                 )
+
+s <- 1
+for(i in 1:nrow(data)) {
+  for(c in 1:nrow(data)) {
+    
+    if(!is.na(data[i,c]) && data[i,c] == 999) {
+    checks_outlier[s,"index"] <- row_number(data[i,c])
+    checks_outlier[s,"value"] <- "999"
+    checks_outlier[s,"variable"] <- names(data[i,c])
+    checks_outlier[s,"has_issue"] <- TRUE
+    checks_outlier[s,"issue_type"] <- "distribution outlier"
+    s <- s + 1
+    }
+  }
+}
+  
+outliers <- cleaninginspectoR::find_outliers(data) %>% filter(!variable %in% c("centre_id", "X_id")) %>% rbind(checks_outlier)  %>% print
+outliers %>% write_xlsx(paste0("output/outliers_", Sys.Date(), ".xlsx"))
 
 # check for logical inconsistencies between number of people needing items and people at center
 data <- data  %>% mutate(CHECK_number_people_items = case_when(center_need_sleeping_item_unit > center_ind | 
@@ -111,16 +137,13 @@ data <- data  %>% mutate(CHECK_number_people_items = case_when(center_need_sleep
 )
 
 sum(data$CHECK_number_people_items == "Number of people in need exceeding number of people at centre", na.rm = T)
-#data %>% write_xlsx("output/data_checked.xlsx")
 
 clog_old <- data %>% filter(CHECK_number_people_items == "Number of people in need exceeding number of people at centre") %>% 
   select(uuid,
          center_need_sleeping_item_unit,
          center_need_clothes_unit,
          center_need_older_pwd_item_unit) %>% 
-  rename("center_need_sleeping_item_unit - OLD" = "center_need_sleeping_item_unit",
-         "center_need_clothes_unit - OLD" = "center_need_clothes_unit",
-         "center_need_older_pwd_item_unit - OLD" = "center_need_older_pwd_item_unit")
+  pivot_longer(-uuid, names_to = "question.name", values_to = "old.value")
 
 # replace number of people estimate when they exceed people at center with number of people at center
 data2 <- data  %>% mutate(center_need_sleeping_item_unit = case_when(center_need_sleeping_item_unit > center_ind ~  center_ind,
@@ -136,20 +159,25 @@ clog_new <- data2 %>% filter(CHECK_number_people_items == "Number of people in n
          center_need_sleeping_item_unit,
          center_need_clothes_unit,
          center_need_older_pwd_item_unit) %>% 
-  rename("center_need_sleeping_item_unit - NEW" = "center_need_sleeping_item_unit",
-         "center_need_clothes_unit - NEW" = "center_need_clothes_unit",
-         "center_need_older_pwd_item_unit - NEW" = "center_need_older_pwd_item_unit")
+  pivot_longer(-uuid, names_to = "question.name", values_to = "new.value")
 
-clog_logical <- left_join(clog_old, clog_new, by = "uuid")
+clog_logical <- left_join(clog_old, clog_new, by = c("uuid", "question.name")) %>% filter(old.value != new.value)
+
 clog_logical %>% write_xlsx(paste0("output/clog_logical_", Sys.Date(), ".xlsx"))
 
-# export clean dataset with checks and without excluded variables
-checks <- data %>% select(CHECK_interview_duration, CHECK_number_people_items, CHECK_dup_center_id, uuid)
+# export raw dataset with macro data checks
+checks <- data %>% select(CHECK_no_consent,
+                          CHECK_dup_center_id,
+                          CHECK_interview_duration, 
+                          uuid)
 data_checks <- left_join(raw_data, checks, by = "uuid")
 data_checks %>% 
-  write_xlsx(paste0("output/MDA_RAC_raw_data_with_checks_", Sys.Date(), ".xlsx"))
+  write_xlsx(paste0("output/MDA_RAC_raw_data_with_macro_checks_", Sys.Date(), ".xlsx"))
 
 ### make modifications & additions to data
+
+data  <- data  %>% filter(consent == "yes")
+data <- data %>% filter(!duplicated(uuid))
 
 # replace NAs with 0s in integer vars
 questions_int_no_age <- questions_int[!questions_int %in% c("child_0_2_number", "child_2_6_number", "child_7_11_number", "child_12_18_number", "demo_elderly", "how_many_are_children_2_18_years_old")]
@@ -284,7 +312,7 @@ vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("ho
 data <- data %>% select(uuid, contains(vars_clean)) %>% select(-what_type_of_building_is_the_c_new)
 
 # export clean dataset without checks
-data %>% write_xlsx(paste0("output/MDA_RAC_clean_data_for_sharing_unlabelled_", Sys.Date(), ".xlsx"))
+data %>% write_xlsx(paste0("output/MDA_RAC_clean_data_unlabelled_", Sys.Date(), ".xlsx"))
 data %>% write_xlsx("input/clean_data.xlsx")
 
 # export clean dataset with labels
@@ -300,5 +328,5 @@ data_ro <- from_xml_tolabel(db = data,
                             choices_label = "label::Romanian",
                             survey_label = "label::Romanian")
 
-data_en %>% write_xlsx(paste0("output/MDA_RAC_clean_data_for_sharing_labelled_EN_", Sys.Date(), ".xlsx"))
-data_ro %>% write_xlsx(paste0("output/MDA_RAC_clean_data_for_sharing_labelled_RO_", Sys.Date(), ".xlsx"))
+data_en %>% write_xlsx(paste0("output/MDA_RAC_clean_data_labelled_EN_", Sys.Date(), ".xlsx"))
+data_ro %>% write_xlsx(paste0("output/MDA_RAC_clean_data_labelled_RO_", Sys.Date(), ".xlsx"))
