@@ -1,3 +1,8 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
 # Instructions for using the R scripts data_cleaning and data_analysis of the project mda_rac_monitoring
 
 Steps:
