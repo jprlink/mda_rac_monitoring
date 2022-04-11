@@ -23,7 +23,11 @@ a) CHECK_no_consent: No consent. Add survey to the tab "deletion" of the cleanin
 b) CHECK_dup_center_id: Duplicated centre ID (there should be only one per round). if survey is indeed for same centre, add survey to the tab "deletion" of the cleaning log. If not, change the id in the "change" tab.
 c) CHECK_interview_duration: interview duration below 5 minutes. If enumerator cannot provide a satisfying explanation, add survey to the tab "deletion" of the cleaning log.
 
+<<<<<<< HEAD
 Also, just to be sure, skim the raw data manually if you find any illogical values.
+=======
+Also, just to be sure, skim the raw data manually if you find any unlogical values.
+>>>>>>> d40e2760230f2a28b6819a03c54edd49f3c57145
 
 7) Check the output file "clog_logical_[date]": It shows values of variables where the number of people in need for three items exceed number of people at the centre. Add the changes to the "change" tab of the cleaning log. The structure of the file is already similar to the cleaning log, so you just need to copy paste.
 
