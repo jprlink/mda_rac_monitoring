@@ -268,9 +268,40 @@ clog_get_cleaninglog<-function(df){
 
 
 
-
-
-
+pivot_longer_other <- function(df, vars_other) {
+  
+  require(tidyverse)
+  
+  list <- list()
+  
+  index <- "index"
+  
+  vars_other <- append(vars_other, index)
+  
+  other_data <- df[,vars_other]
+  
+  for (i in 1:nrow(other_data)) { 
+    
+    if(rowSums(is.na(other_data[i,])) < (ncol(other_data)-1)) {
+      rdata <- other_data[i,] %>% pivot_longer(!index, 
+                                               names_to = "variable",
+                                               values_to = "original", 
+                                               values_drop_na = T)
+      
+      list[[i]] <- rdata
+      
+    }
+  } 
+  
+  other_data_long <- do.call(rbind, list)
+  
+  dup <- other_data_long[,c("index","variable")] 
+  
+  other_data_long <- other_data_long[!duplicated(dup) & 
+                                       !duplicated(dup, fromLast=TRUE),]
+  return(other_data_long)
+  
+} 
 
 
 

@@ -23,22 +23,23 @@ Important: Make sure that you update the column "clean_dataset" in which you spe
 
 6) Check the file "MDA_RAC_raw_data_with_checks_[date]" in the output folder:
 
-In the last columns, you will find macro data checks for each survey:
-a) CHECK_no_consent: No consent. Add survey to the tab "deletion" of the cleaning log.
-b) CHECK_dup_center_id: Duplicated centre ID (there should be only one per round). if survey is indeed for same centre, add survey to the tab "deletion" of the cleaning log. If not, change the id in the "change" tab.
-c) CHECK_interview_duration: interview duration below 5 minutes. If enumerator cannot provide a satisfying explanation, add survey to the tab "deletion" of the cleaning log.
+In the last columns, you will find meta data checks for each survey:
+a) CHECK_dup_uuid: Duplicated survey. Choose the submissions (via index column) you want to delete and add them to the tab "deletion" of the cleaning log. Usually, you want to keep the latest submission. 
+b) CHECK_no_consent: No consent. Add survey to the tab "deletion" of the cleaning log.
+c) CHECK_dup_center_id: Duplicated centre ID (there should be only one per round). if survey is indeed for same centre, add survey to the tab "deletion" of the cleaning log. If not, change the id in the "change" tab.
+d) CHECK_interview_duration: interview duration below 5 minutes. If enumerator cannot provide a satisfying explanation, add survey to the tab "deletion" of the cleaning log.
 
 Also, just to be sure, skim the raw data manually if you find any illogical values.
 
-7) Check the output file "clog_logical_[date]": It shows values of variables where the number of people in need for three items exceed number of people at the centre. Add the changes to the "change" tab of the cleaning log. The structure of the file is already similar to the cleaning log, so you just need to copy paste.
+7) Check the output file "clog_logical_[date]": It shows values of variables where the number of people in need for three items exceed number of people at the centre. Add the changes to the "change" tab of the cleaning log. The structure of the file is already similar to the cleaning log, so you just need to copy paste. Important: always add the uuid AND index of a submission to the cleaning log.
 
-8) Check the file "other_response_translations_[date]" in the output folder: It contains all translated "other" responses. Add all translations to the cleaning log tab "change". In addition, if translation corresponds to existing choices of the respective question, add the change to the "change" tab of the cleaning log. Make sure that the variable with the "other" text response (old value is the text response and new value is blank) is added to the cleaning log, as well as the binary variable with the old "other" choice (old value is 1 and new value is 0) and the binary variable with the new choice  (old value is 0 and new value is 1).
+8) Check the file "other_response_translations_[date]" in the output folder: It contains all translated "other" responses. Add all translations to the cleaning log tab "change". In addition, if translation corresponds to existing choices of the respective question, add the change to the "change" tab of the cleaning log. Make sure that the variable with the "other" text response (old value is the text response and new value is blank) is added to the cleaning log, as well as the binary variable with the old "other" choice (old value is 1 and new value is 0) and the binary variable with the new choice  (old value is 0 and new value is 1). Important: always add the uuid AND index of a submission to the cleaning log.
 
 9) Check the file "outliers_[date]" in the output folder: Check if any of the outliers require recoding. If yes, add them to the "change" tab of the cleaning log.
 
 Important: Make sure that all numerical values in the new.value column of the cleaning log are formatted as numerical and all character values formatted as character. 
 
-10)Once the cleaning log is completed, run the script "data_cleaning" again. Now check the same outputs and verify whether any of the problematic issues (apart from translations of other responses) are still flagged. If yes, make sure they are addressed correctly in the cleaning log (change and deletion tabs) and then run the cleaning script again. 
+10) Once the cleaning log is completed, run the script "data_cleaning" again. Now check the same outputs and verify whether any of the problematic issues (apart from translations of other responses) are still flagged. If yes, make sure they are addressed correctly in the cleaning log (change and deletion tabs) and then run the cleaning script again. 
 
 Data cleaning is finished now and you will find the clean dataset "MDA_RAC_clean_data_..."", as unlabelled and two labelled (in EN and RO) versions in the output folder.
 
