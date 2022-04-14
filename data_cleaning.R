@@ -53,7 +53,10 @@ clog_change <- cleaninglog(clog_change$index,
 
 clog_change_cat <- clog_change %>% filter(!variables %in% questions_num)
 clog_change_cat$new_values <- as.character(clog_change_cat$new_values)
+clog_change_cat$variables[!clog_change_cat$variables %in% names(data)]
+
 clog_change_num <- clog_change %>% filter(variables %in% questions_num)
+clog_change_num$new_values <- as.numeric(clog_change_num$new_values)
 
 clog_deletion <- read_xlsx("input/cleaning_log.xlsx", 2)
 
@@ -109,7 +112,7 @@ boxplot(data$interview_duration)
 # check for outliers
 
 # 999 (meaning don't know)
-checks_outlier <- data_frame(index =  NA_integer_,
+checks_outlier <- tibble(index =  NA_integer_,
                  value = NA_character_,
                  variable = NA_character_,
                  has_issue = NA,                  
@@ -299,24 +302,25 @@ data$centre_id[which(is.na(data$what_type_of_building_is_the_c))]
 
 # exclude data without consent or duplicated uuid
 data  <- data  %>% filter(consent == "yes")
-data <- data %>% filter(!duplicated(uuid))
+#data <- data %>% filter(!duplicated(uuid))
 
 # exclude not needed variables
 vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "center_ind_breakdown_age", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18", "center_ind_breakdown_gender"))
-data <- data %>% select(uuid, contains(vars_clean)) %>% select(-what_type_of_building_is_the_c_new)
+data_clean_for_sharing <- data %>% select(uuid, contains(vars_clean)) %>% select(-c(questions_sm, "what_type_of_building_is_the_c_new"))
+data_clean <- data %>% select(uuid, contains(vars_clean)) %>% select(-c("what_type_of_building_is_the_c_new")) 
 
 # export clean dataset without checks
-data %>% write_xlsx(paste0("output/MDA_RAC_clean_data_unlabelled_", Sys.Date(), ".xlsx"))
-data %>% write_xlsx("input/clean_data.xlsx")
+data_clean_for_sharing %>% write_xlsx(paste0("output/MDA_RAC_clean_data_unlabelled_", Sys.Date(), ".xlsx"))
+data_clean %>% write_xlsx("input/clean_data.xlsx")
 
 # export clean dataset with labels
-data_en <- from_xml_tolabel(db = data,
+data_en <- from_xml_tolabel(db = data_clean_for_sharing,
                          choices = choices,
                          survey = survey,
                          choices_label = "label::English",
                          survey_label = "label::English")
 
-data_ro <- from_xml_tolabel(db = data,
+data_ro <- from_xml_tolabel(db = data_clean_for_sharing,
                             choices = choices,
                             survey = survey,
                             choices_label = "label::Romanian",
