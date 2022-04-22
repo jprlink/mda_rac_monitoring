@@ -31,7 +31,7 @@ questions_text <- survey$name[grepl("text", survey$type)]
 questions_int <- survey$name[grepl("integer", survey$type)] %>% append(c("calc_ukrainian","calc_third_party"))
 questions_cat <- append(questions_so, questions_sm)
 questions_other <- grep("_specify|_explain_why|_other", names(data), value = T)
-questions_other <- questions_other[!questions_other %in% questions_int]
+questions_other <- questions_other[!questions_other %in% c(questions_int, questions_cat)]
 questions_sm_num <- data %>% select(contains(questions_sm) & !any_of(c(questions_sm, questions_other))) %>% names()
 questions_num <- append(questions_int, questions_sm_num)
 questions_note <- grep("_note$", names(data), value = T) 
@@ -77,7 +77,6 @@ dup_uuid <- data$uuid[duplicated(data$uuid)] %>% print
 
 # check for surveys for the same center (it should only be one per center)
 dup_centre_id <- data$centre_id[duplicated(data$centre_id)] %>% print
-
 
 data <- data %>% mutate(CHECK_dup_uuid = case_when(uuid %in% dup_uuid ~ "Duplicated UUID"),
                         CHECK_no_consent = case_when(index %in% index_no_consent ~ "No consent"),
@@ -146,9 +145,9 @@ data <- data  %>% mutate(CHECK_number_people_items = case_when(center_need_sleep
                                                                )
 )
 
-sum(data$CHECK_number_people_items == "Number of people in need exceeding number of people at centre", na.rm = T)
+sum(!is.na(data$CHECK_number_people_items))
 
-clog_old <- data %>% filter(CHECK_number_people_items == "Number of people in need exceeding number of people at centre") %>% 
+clog_items_old <- data %>% filter(!is.na(CHECK_number_people_items)) %>% 
   select(uuid,
          index,
          center_need_sleeping_item_unit,
@@ -165,7 +164,7 @@ data2 <- data  %>% mutate(center_need_sleeping_item_unit = case_when(center_need
                                                                      TRUE ~ center_need_older_pwd_item_unit)
 )
 
-clog_new <- data2 %>% filter(CHECK_number_people_items == "Number of people in need exceeding number of people at centre") %>% 
+clog_items_new <- data2 %>% filter(!is.na(CHECK_number_people_items)) %>% 
   select(uuid,
          index,
          center_need_sleeping_item_unit,
@@ -173,7 +172,44 @@ clog_new <- data2 %>% filter(CHECK_number_people_items == "Number of people in n
          center_need_older_pwd_item_unit) %>% 
   pivot_longer(-c("uuid", "index"), names_to = "question.name", values_to = "new.value")
 
-clog_logical <- left_join(clog_old, clog_new, by = c("index", "uuid", "question.name")) %>% filter(old.value != new.value)
+clog_items <- left_join(clog_items_old, clog_items_new, by = c("index", "uuid", "question.name")) %>% filter(old.value != new.value)
+
+# check for logical inconsistencies between total of gender disaggregation and people at center
+data <- data  %>% mutate(CHECK_gender_disaggregation = case_when((!is.na(how_many_are_women) & is.na(how_many_are_other) & how_many_are_women + how_many_are_men != center_ind) |
+                                                                   (!is.na(how_many_are_women) & !is.na(how_many_are_other) & how_many_are_women + how_many_are_men + how_many_are_other != center_ind)  ~ "Total of gender disaggregation does not equal number of people at centre" 
+)
+)
+
+sum(!is.na(data$CHECK_gender_disaggregation), na.rm = T)
+
+clog_gender_old <- data %>% filter(!is.na(CHECK_gender_disaggregation)) %>% 
+  select(uuid,
+         index,
+         how_many_are_women,
+         how_many_are_men,
+         how_many_are_other) %>% 
+  pivot_longer(-c("uuid", "index"), names_to = "question.name", values_to = "old.value")
+
+# replace number of disaggregation with NA
+data3 <- data  %>% mutate(how_many_are_women = case_when(!is.na(CHECK_gender_disaggregation) ~ NA_real_ ,
+                                                         is.na(CHECK_gender_disaggregation) ~ how_many_are_women),
+                          how_many_are_men = case_when(!is.na(CHECK_gender_disaggregation) ~ NA_real_ ,
+                                                         is.na(CHECK_gender_disaggregation) ~ how_many_are_men),
+                          how_many_are_other = case_when(!is.na(CHECK_gender_disaggregation) ~ NA_real_ ,
+                                                         is.na(CHECK_gender_disaggregation) ~ how_many_are_other)
+)
+
+clog_gender_new <- data3 %>% filter(!is.na(CHECK_gender_disaggregation)) %>% 
+  select(uuid,
+         index,
+         how_many_are_women,
+         how_many_are_men,
+         how_many_are_other) %>% 
+  pivot_longer(-c("uuid", "index"), names_to = "question.name", values_to = "new.value")
+
+clog_gender <- left_join(clog_gender_old, clog_gender_new, by = c("index", "uuid", "question.name")) %>% filter(!is.na(old.value))
+
+clog_logical <- rbind(clog_gender, clog_items)
 
 clog_logical %>% write_xlsx(paste0("output/clog_logical_", Sys.Date(), ".xlsx"))
 
@@ -183,6 +219,7 @@ checks <- data %>% select(CHECK_dup_uuid,
                           CHECK_dup_center_id,
                           CHECK_interview_duration, 
                           index)
+
 data_checks <- left_join(raw_data, checks, by = "index")
 data_checks %>% 
   write_xlsx(paste0("output/MDA_RAC_raw_data_with_macro_checks_", Sys.Date(), ".xlsx"))
@@ -190,8 +227,8 @@ data_checks %>%
 ### make modifications & additions to data
 
 # replace NAs with 0s in integer vars
-questions_int_no_age <- questions_int[!questions_int %in% c("child_0_2_number", "child_2_6_number", "child_7_11_number", "child_12_18_number", "demo_elderly", "how_many_are_children_2_18_years_old")]
-data[questions_int_no_age][is.na(data[questions_int_no_age])] <- 0
+questions_int_no_age_gender <- questions_int[!questions_int %in% c("how_many_are_women", "how_many_are_men", "how_many_are_other", "child_0_2_number", "child_2_6_number", "child_7_11_number", "child_12_18_number", "demo_elderly", "how_many_are_children_2_18_years_old")]
+data[questions_int_no_age_gender][is.na(data[questions_int_no_age_gender])] <- 0
 
 # # exclude 0s from categorical columns
 # data[c(questions_cat, questions_text)][data[c(questions_cat, questions_text)]== "0"] <- NA_character_
@@ -290,7 +327,8 @@ data$center_ind_breakdown_gender <- data$center_ind
 # set NAs for all gender variables when one of them is NA
 vars_gender <- c("center_ind_breakdown_gender", "how_many_are_women", "how_many_are_men", "how_many_are_other")
 data[vars_gender]
-data[which(data$do_you_know_how_many_are_men_women == "no"), vars_gender] <- NA
+data <- data %>% mutate(set_na_gender = case_when(rowSums(across(all_of(c("how_many_are_women", "how_many_are_men")), ~ is.na(.))) > 0 ~"yes"))
+data[which(data$set_na_gender == "yes"), vars_gender] <- NA
 data[vars_gender]
 
 # add building type when building type was already known before

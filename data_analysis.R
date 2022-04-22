@@ -35,6 +35,7 @@ questions_int <- survey$name[grepl("integer", survey$type)] %>% append(c("calc_u
                                                                          ))
 questions_cat <- append(questions_so, questions_sm)
 questions_other <- grep("_specify|_explain_why|_other", names(data), value = T)
+questions_other <- questions_other[!questions_other %in% c(questions_int, questions_cat)]
 questions_sm_num <- data %>% select(contains(questions_sm) & !any_of(c(questions_sm, questions_other))) %>% names()
 questions_num <- append(questions_int, questions_sm_num)
 
