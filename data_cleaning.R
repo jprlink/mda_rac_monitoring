@@ -103,7 +103,7 @@ time_check <- function(df, time_min, time_max){
 data <- time_check(data , time_min, time_max)
 
 # Don't check time when the center doesnt need anything.
-data$CHECK_interview_duration[which(data$need_center == "no")] <- NA
+data$CHECK_interview_duration[which(data$need_center == "no" | data$consent == "no")] <- NA
 
 sum(data$CHECK_interview_duration == "Interview time less than five minutes", na.rm = T)
 boxplot(data$interview_duration)
