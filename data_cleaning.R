@@ -45,11 +45,18 @@ data[c(questions_cat, questions_other, questions_note)] <- lapply(data[c(questio
 
 clog_change <- read_xlsx("input/cleaning_log.xlsx")
 clog_change$index <- as.character(clog_change$index)
+
+# save responses that should not be changed
+clog_ids_no_change <- paste0(clog_change$index, "-/-",clog_change$question.name)[clog_change$changed == "FALSE"]
+values_no_change <- clog_change$old.value[clog_change$changed == "FALSE"]
+
 clog_change <- cleaninglog(clog_change$index, 
                            clog_change$question.name, 
                            clog_change$new.value,  
                            clog_change$changed, 
                              "index")
+
+clog_change$variables[!clog_change$variables %in% names(data)]
 
 clog_change_cat <- clog_change %>% filter(!variables %in% questions_num)
 clog_change_cat$new_values <- as.character(clog_change_cat$new_values)
@@ -134,7 +141,7 @@ for(i in 1:nrow(data)) {
 }
   
 outliers <- cleaninginspectoR::find_outliers(data) %>% 
-  filter(!variable %in% c("centre_id", "X_id")) %>% 
+  filter(!variable %in% c("centre_id", "X_id"), !value %in% values_no_change) %>% 
   rbind(checks_outlier)  %>% select(-c("index", "has_issue")) %>% print
 outliers %>% write_xlsx(paste0("output/outliers_", Sys.Date(), ".xlsx"))
 
@@ -211,6 +218,8 @@ clog_gender <- left_join(clog_gender_old, clog_gender_new, by = c("index", "uuid
 
 clog_logical <- rbind(clog_gender, clog_items)
 
+clog_logical <- clog_logical %>% filter(!paste0(index, "-/-", question.name) %in% clog_ids_no_change)
+
 clog_logical %>% write_xlsx(paste0("output/clog_logical_", Sys.Date(), ".xlsx"))
 
 # export raw dataset with macro data checks
@@ -276,7 +285,7 @@ for (i in 1:nrow(data)) {
   }
 }
 
-data[c("index",questions_other)]
+#data[c("index",questions_other)]
 
 # set NA for staff when number of staff 0 and there are people hosted
 data$how_many_staff_does_entre_currently_have[which(data$how_many_staff_does_entre_currently_have == 0 &
@@ -307,10 +316,11 @@ data$center_ind_breakdown_age <- data$center_ind
 
 # set NAs for all three age variable when one of them is NA
 vars_age <- c("center_ind_breakdown_age", "child_0_2_number", "how_many_are_children_2_18_years_old", "demo_elderly")
-data[vars_age]
+vars_age_all <- c("center_ind_breakdown_age", "child_0_2_number", "how_many_are_children_2_18_years_old", "demo_elderly", "child_2_6_number", "child_7_11_number", "child_12_18_number")
+data[vars_age_all]
 data <- data %>% mutate(set_na_age = case_when(rowSums(across(all_of(vars_age), ~ is.na(.))) > 0 ~"yes"))
-data[which(data$set_na_age == "yes"), vars_age] <- NA
-data[vars_age]
+data[which(data$set_na_age == "yes"), vars_age_all] <- NA
+data[vars_age_all]
 
 # calculate percentages of demographic groups per center
 data <- data %>% mutate(perc_0_2 = child_0_2_number / center_ind,
@@ -331,21 +341,23 @@ data <- data %>% mutate(set_na_gender = case_when(rowSums(across(all_of(c("how_m
 data[which(data$set_na_gender == "yes"), vars_gender] <- NA
 data[vars_gender]
 
-# add building type when building type was already known before
-building_type <- read_xlsx("input/building_type.xlsx") %>% select(-label)
-building_type$centre_id <- as.character(building_type$centre_id )
-data <- left_join(data, building_type, by = "centre_id")
-data  <- data  %>% mutate(what_type_of_building_is_the_c = ifelse(is.na(what_type_of_building_is_the_c), what_type_of_building_is_the_c_new, what_type_of_building_is_the_c))
-data$centre_id[which(is.na(data$what_type_of_building_is_the_c))]
+# # add building type when building type was already known before
+# building_type <- read_xlsx("input/building_type.xlsx") %>% select(-label)
+# building_type$centre_id <- as.character(building_type$centre_id )
+# data <- left_join(data, building_type, by = "centre_id")
+# data  <- data  %>% mutate(what_type_of_building_is_the_c = ifelse(is.na(what_type_of_building_is_the_c), what_type_of_building_is_the_c_new, what_type_of_building_is_the_c))
+# data$centre_id[which(is.na(data$what_type_of_building_is_the_c))]
 
 # exclude data without consent or duplicated uuid
 data  <- data  %>% filter(consent == "yes")
 #data <- data %>% filter(!duplicated(uuid))
 
 # exclude not needed variables
-vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "center_ind_breakdown_age", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18", "center_ind_breakdown_gender"))
-data_clean_for_sharing <- data %>% select(uuid, contains(vars_clean)) %>% select(-c(questions_sm, "what_type_of_building_is_the_c_new"))
-data_clean <- data %>% select(uuid, contains(vars_clean)) %>% select(-c("what_type_of_building_is_the_c_new")) 
+vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("index", "how_many_staff_per_people_hosted", "center_ind_breakdown_age", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18", "center_ind_breakdown_gender"))
+# data_clean_for_sharing <- data %>% select(uuid, contains(vars_clean)) %>% select(-c(questions_sm, "what_type_of_building_is_the_c_new"))
+# data_clean <- data %>% select(uuid, contains(vars_clean)) %>% select(-c("what_type_of_building_is_the_c_new")) 
+data_clean_for_sharing <- data %>% select(uuid, contains(all_of(vars_clean))) %>% select(-c(questions_sm))
+data_clean <- data %>% select(uuid, contains(all_of(vars_clean)))
 
 # export clean dataset without checks
 data_clean_for_sharing %>% write_xlsx(paste0("output/MDA_RAC_clean_data_unlabelled_", Sys.Date(), ".xlsx"))
