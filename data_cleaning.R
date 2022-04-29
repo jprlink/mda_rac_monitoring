@@ -117,32 +117,35 @@ boxplot(data$interview_duration)
 
 # check for outliers
 
-# 999 (meaning don't know)
-checks_outlier <- tibble(index =  NA_integer_,
-                 value = NA_character_,
-                 variable = NA_character_,
-                 has_issue = NA,                  
-                 issue_type = NA_character_,
-                 )
+list_outliers <- list()
 
-s <- 1
-for(i in 1:nrow(data)) {
-  for(c in 1:nrow(data)) {
+for(c in 1:ncol(data)) {
+  
+  if(names(data[c]) %in% questions_int){
     
-    if(!is.na(data[i,c]) && data[i,c] == 999) {
-    checks_outlier[s,"index"] <- data[i,"index"]
-    checks_outlier[s,"value"] <- "999"
-    checks_outlier[s,"variable"] <- names(data[i,c])
-    checks_outlier[s,"has_issue"] <- TRUE
-    checks_outlier[s,"issue_type"] <- "distribution outlier"
-    s <- s + 1
-    }
+  cname <- names(data[c])
+  col_ind <- grep("^uuid|^index", colnames(data)) %>% append(c)
+  out <- boxplot.stats(as.vector(unlist(data[c])))$out
+  out_ind <- which(as.vector(unlist(data[c])) %in% c(out))
+  
+  if(length(out_ind) >0) {
+    
+    df_outlier <- data[out_ind, col_ind] %>%
+     pivot_longer(cols = all_of(cname), 
+                 names_to =  "question.name",
+                 values_to = "old.value") %>% 
+      mutate(old.value = as.character(old.value))
+    
+  list_outliers[[c]] <- df_outlier
+  }
   }
 }
-  
-outliers <- cleaninginspectoR::find_outliers(data) %>% 
-  filter(!variable %in% c("centre_id", "X_id"), !value %in% values_no_change) %>% 
-  rbind(checks_outlier)  %>% select(-c("index", "has_issue")) %>% print
+
+list_outliers <- list_outliers[lapply(list_outliers,length)>0]
+outliers  <- do.call(bind_rows, list_outliers) %>% 
+  filter(!paste0(index, "-/-", question.name) %in% clog_ids_no_change) %>% 
+  print
+
 outliers %>% write_xlsx(paste0("output/outliers_", Sys.Date(), ".xlsx"))
 
 # check for logical inconsistencies between number of people needing items and people at center
