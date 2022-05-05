@@ -219,7 +219,61 @@ clog_gender_new <- data3 %>% filter(!is.na(CHECK_gender_disaggregation)) %>%
 
 clog_gender <- left_join(clog_gender_old, clog_gender_new, by = c("index", "uuid", "question.name")) %>% filter(!is.na(old.value))
 
-clog_logical <- rbind(clog_gender, clog_items)
+# check for NAs for age and gender variables when there are no people at the centre
+
+questions_nas_demo_num <- c("child_0_2_number",
+                        "child_2_6_number",
+                        "child_7_11_number",
+                        "child_12_18_number",
+                        "how_many_are_children_2_18_years_old",
+                        "demo_elderly",
+                        "vuln_groups.plw",
+                        "vuln_groups.solo_child",
+                        "vuln_groups.disability",
+                        "vuln_groups.medical_condition",
+                        "vuln_groups.protection_need",
+                        "vuln_groups.other"
+)
+
+questions_nas_demo_cat <- c("do_you_know_how_many_are_men",
+                            "do_you_know_how_many_are_women",
+                            "do_you_know_how_many_are_other",
+                            "child_0_2",
+                            "child_age_breakdown",
+                            "do_you_know_how_many_are_child",
+                            "elderly"
+)
+
+questions_demo_all <- c(questions_nas_demo_num, questions_nas_demo_cat,"vuln_groups.none")
+
+data <- data  %>% mutate(CHECK_NAs_when_no_people = case_when((rowSums(across(all_of(questions_demo_all), ~ is.na(.)))  > 0 |
+                                                                rowSums(across(all_of(questions_nas_demo_cat), ~ . == "no"))  > 0 |
+                                                                vuln_groups.none == 1)
+                                                              & center_ind == 0  ~ "The number of people hosted is 0, so number of age groups should be the same." 
+)
+)
+
+sum(!is.na(data$CHECK_NAs_when_no_people), na.rm = T)
+data[questions_demo_all] <- lapply(data[questions_demo_all], as.character)
+
+clog_no_people_old <- data %>% filter(!is.na(CHECK_NAs_when_no_people)) %>% 
+  select(uuid,
+         index,
+         all_of(questions_demo_all)) %>% 
+  pivot_longer(-c("uuid", "index"), names_to = "question.name", values_to = "old.value")
+
+
+clog_no_people <- clog_no_people_old %>% 
+  mutate(new.value = case_when(question.name %in% questions_nas_demo_num ~ "0",
+                               question.name %in% "vuln_groups.none" ~ "1",
+                               question.name %in% questions_nas_demo_cat ~ "yes"
+                               )
+         ) %>% 
+  filter(!old.value %in% new.value)
+
+# merge cleaning log templates with logical issues
+
+clog_logical <- rbind(clog_gender, clog_items, clog_no_people)
 
 clog_logical <- clog_logical %>% filter(!paste0(index, "-/-", question.name) %in% clog_ids_no_change)
 
@@ -344,29 +398,27 @@ data <- data %>% mutate(set_na_gender = case_when(rowSums(across(all_of(c("how_m
 data[which(data$set_na_gender == "yes"), vars_gender] <- NA
 data[vars_gender]
 
-# # add building type when building type was already known before
-# building_type <- read_xlsx("input/building_type.xlsx") %>% select(-label)
-# building_type$centre_id <- as.character(building_type$centre_id )
-# data <- left_join(data, building_type, by = "centre_id")
-# data  <- data  %>% mutate(what_type_of_building_is_the_c = ifelse(is.na(what_type_of_building_is_the_c), what_type_of_building_is_the_c_new, what_type_of_building_is_the_c))
-# data$centre_id[which(is.na(data$what_type_of_building_is_the_c))]
+# add building type when building type was already known before
+building_type <- read_xlsx("input/building_type.xlsx") %>% select(-label)
+building_type$centre_id <- as.character(building_type$centre_id )
+data <- left_join(data, building_type, by = "centre_id")
+data  <- data  %>% mutate(what_type_of_building_is_the_c = ifelse(is.na(what_type_of_building_is_the_c), what_type_of_building_is_the_c_new, what_type_of_building_is_the_c))
+data$centre_id[which(is.na(data$what_type_of_building_is_the_c))]
 
 # exclude data without consent or duplicated uuid
 data  <- data  %>% filter(consent == "yes")
 #data <- data %>% filter(!duplicated(uuid))
 
 # exclude not needed variables
-vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("index", "how_many_staff_per_people_hosted", "center_ind_breakdown_age", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18", "center_ind_breakdown_gender"))
-# data_clean_for_sharing <- data %>% select(uuid, contains(vars_clean)) %>% select(-c(questions_sm, "what_type_of_building_is_the_c_new"))
-# data_clean <- data %>% select(uuid, contains(vars_clean)) %>% select(-c("what_type_of_building_is_the_c_new")) 
-data_clean_for_sharing <- data %>% select(uuid, contains(all_of(vars_clean))) %>% select(-c(questions_sm))
-data_clean <- data %>% select(uuid, contains(all_of(vars_clean)))
+vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "center_ind_breakdown_age", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18", "center_ind_breakdown_gender"))
+data_clean_for_sharing <- data %>% select(uuid, index, contains(all_of(vars_clean))) %>% select(-c(all_of(questions_sm_num), "what_type_of_building_is_the_c_new"))
+data_clean <- data %>% select(uuid, index, contains(all_of(vars_clean))) %>% select(-c("what_type_of_building_is_the_c_new"))
 
 # export clean dataset without checks
-data_clean_for_sharing %>% write_xlsx(paste0("output/MDA_RAC_clean_data_unlabelled_", Sys.Date(), ".xlsx"))
+data_clean %>% write_xlsx(paste0("output/MDA_RAC_clean_data_unlabelled_", Sys.Date(), ".xlsx"))
 data_clean %>% write_xlsx("input/clean_data.xlsx")
 
-# export clean dataset with labels
+# export clean dataset with labels (for sharing)
 data_en <- from_xml_tolabel(db = data_clean_for_sharing,
                          choices = choices,
                          survey = survey,
