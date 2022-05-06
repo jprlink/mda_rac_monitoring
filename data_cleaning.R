@@ -221,6 +221,7 @@ clog_gender <- left_join(clog_gender_old, clog_gender_new, by = c("index", "uuid
 
 # check for NAs for age and gender variables when there are no people at the centre
 
+data4 <- data
 questions_nas_demo_num <- c("child_0_2_number",
                         "child_2_6_number",
                         "child_7_11_number",
@@ -246,17 +247,17 @@ questions_nas_demo_cat <- c("do_you_know_how_many_are_men",
 
 questions_demo_all <- c(questions_nas_demo_num, questions_nas_demo_cat,"vuln_groups.none")
 
-data <- data  %>% mutate(CHECK_NAs_when_no_people = case_when((rowSums(across(all_of(questions_demo_all), ~ is.na(.)))  > 0 |
+data4 <- data4  %>% mutate(CHECK_NAs_when_no_people = case_when((rowSums(across(all_of(questions_demo_all), ~ is.na(.)))  > 0 |
                                                                 rowSums(across(all_of(questions_nas_demo_cat), ~ . == "no"))  > 0 |
                                                                 vuln_groups.none == 1)
                                                               & center_ind == 0  ~ "The number of people hosted is 0, so number of age groups should be the same." 
 )
 )
 
-sum(!is.na(data$CHECK_NAs_when_no_people), na.rm = T)
-data[questions_demo_all] <- lapply(data[questions_demo_all], as.character)
+sum(!is.na(data4$CHECK_NAs_when_no_people), na.rm = T)
+data4[questions_demo_all] <- lapply(data4[questions_demo_all], as.character)
 
-clog_no_people_old <- data %>% filter(!is.na(CHECK_NAs_when_no_people)) %>% 
+clog_no_people_old <- data4 %>% filter(!is.na(CHECK_NAs_when_no_people)) %>% 
   select(uuid,
          index,
          all_of(questions_demo_all)) %>% 
@@ -372,6 +373,7 @@ data <- data %>% mutate(how_many_are_children_2_18_years_old = case_when(!is.na(
 data$center_ind_breakdown_age <- data$center_ind
 
 # set NAs for all three age variable when one of them is NA
+questions_nas_demo_num
 vars_age <- c("center_ind_breakdown_age", "child_0_2_number", "how_many_are_children_2_18_years_old", "demo_elderly")
 vars_age_all <- c("center_ind_breakdown_age", "child_0_2_number", "how_many_are_children_2_18_years_old", "demo_elderly", "child_2_6_number", "child_7_11_number", "child_12_18_number")
 data[vars_age_all]
