@@ -45,10 +45,17 @@ data[c(questions_cat, questions_other, questions_note)] <- lapply(data[c(questio
 
 clog_change <- read_xlsx("input/cleaning_log.xlsx")
 clog_change$index <- as.character(clog_change$index)
+clog_change$id <- paste0(clog_change$index, "-/-",clog_change$question.name)
 
 # save responses that should not be changed
-clog_ids_no_change <- paste0(clog_change$index, "-/-",clog_change$question.name)[clog_change$changed == "FALSE"]
-values_no_change <- clog_change$old.value[clog_change$changed == "FALSE"]
+clog_ids_no_change <- clog_change$id[clog_change$changed == "FALSE"] %>% unique()
+clog_ids_all <- clog_change$id %>% unique()
+clog_ids_dup <- clog_change$id[duplicated(clog_change$id)] %>% unique()
+values_no_change <- clog_change$old.value[clog_change$changed == "FALSE"] %>% unique()
+
+# check if there are any duplicated cleaning log entries
+clog_change %>% filter(id %in% clog_ids_dup) %>%
+  write_xlsx(paste0("output/MDA_RAC_dup_clog_entries_", Sys.Date(), ".xlsx"))
 
 clog_change <- cleaninglog(clog_change$index, 
                            clog_change$question.name, 
@@ -115,6 +122,18 @@ data$CHECK_interview_duration[which(data$need_center == "no" | data$consent == "
 sum(data$CHECK_interview_duration == "Interview time less than five minutes", na.rm = T)
 boxplot(data$interview_duration)
 
+# export raw dataset with macro data checks
+checks <- data %>% select(CHECK_dup_uuid,
+                          CHECK_no_consent,
+                          CHECK_dup_center_id,
+                          CHECK_interview_duration, 
+                          uuid, 
+                          index)
+
+data_checks <- left_join(raw_data, checks, by = c("uuid", "index"))
+data_checks %>% 
+  write_xlsx(paste0("output/MDA_RAC_raw_data_with_macro_checks_", Sys.Date(), ".xlsx"))
+
 # check for outliers
 
 list_outliers <- list()
@@ -142,11 +161,15 @@ for(c in 1:ncol(data)) {
 }
 
 list_outliers <- list_outliers[lapply(list_outliers,length)>0]
-outliers  <- do.call(bind_rows, list_outliers) %>% 
+clog_outliers  <- do.call(bind_rows, list_outliers) %>% 
   filter(!paste0(index, "-/-", question.name) %in% clog_ids_no_change) %>% 
+  mutate(issue = "Normal distribution outlier",
+         feedback	= NA,
+         changed = NA,
+         new.value = NA
+         ) %>%
+  select(uuid, index, question.name, issue, feedback, changed, old.value, new.value) %>%
   print
-
-outliers %>% write_xlsx(paste0("output/outliers_", Sys.Date(), ".xlsx"))
 
 # check for logical inconsistencies between number of people needing items and people at center
 data <- data  %>% mutate(CHECK_number_people_items = case_when(center_need_sleeping_item_unit > center_ind | 
@@ -182,7 +205,14 @@ clog_items_new <- data2 %>% filter(!is.na(CHECK_number_people_items)) %>%
          center_need_older_pwd_item_unit) %>% 
   pivot_longer(-c("uuid", "index"), names_to = "question.name", values_to = "new.value")
 
-clog_items <- left_join(clog_items_old, clog_items_new, by = c("index", "uuid", "question.name")) %>% filter(old.value != new.value)
+clog_items <- left_join(clog_items_old, clog_items_new, by = c("index", "uuid", "question.name")) %>% 
+  filter(old.value != new.value) %>%
+  mutate(issue = "Logical inconsistencies between people in need of items and people at center",
+         feedback	= NA,
+         changed = NA
+  ) %>%
+  select(uuid, index, question.name, issue, feedback, changed, old.value, new.value) %>%
+  print
 
 # check for logical inconsistencies between total of gender disaggregation and people at center
 data <- data  %>% mutate(CHECK_gender_disaggregation = case_when((!is.na(how_many_are_women) & is.na(how_many_are_other) & how_many_are_women + how_many_are_men != center_ind) |
@@ -217,12 +247,22 @@ clog_gender_new <- data3 %>% filter(!is.na(CHECK_gender_disaggregation)) %>%
          how_many_are_other) %>% 
   pivot_longer(-c("uuid", "index"), names_to = "question.name", values_to = "new.value")
 
-clog_gender <- left_join(clog_gender_old, clog_gender_new, by = c("index", "uuid", "question.name")) %>% filter(!is.na(old.value))
+clog_gender <- left_join(clog_gender_old, clog_gender_new, by = c("index", "uuid", "question.name")) %>% 
+  filter(!is.na(old.value)) %>%
+  mutate(issue = "Logical inconsistencies between total of gender disaggregation and people at center",
+         feedback	= NA,
+         changed = NA
+  ) %>%
+  select(uuid, index, question.name, issue, feedback, changed, old.value, new.value) %>%
+  print
 
 # check for NAs for age and gender variables when there are no people at the centre
 
 data4 <- data
-questions_nas_demo_num <- c("child_0_2_number",
+questions_nas_demo_num <- c("how_many_are_men",
+                            "how_many_are_women",
+                            "how_many_are_other",
+                            "child_0_2_number",
                         "child_2_6_number",
                         "child_7_11_number",
                         "child_12_18_number",
@@ -249,12 +289,13 @@ questions_demo_all <- c(questions_nas_demo_num, questions_nas_demo_cat,"vuln_gro
 
 data4 <- data4  %>% mutate(CHECK_NAs_when_no_people = case_when((rowSums(across(all_of(questions_demo_all), ~ is.na(.)))  > 0 |
                                                                 rowSums(across(all_of(questions_nas_demo_cat), ~ . == "no"))  > 0 |
-                                                                vuln_groups.none == 1)
+                                                                vuln_groups.none == 0)
                                                               & center_ind == 0  ~ "The number of people hosted is 0, so number of age groups should be the same." 
 )
 )
 
 sum(!is.na(data4$CHECK_NAs_when_no_people), na.rm = T)
+
 data4[questions_demo_all] <- lapply(data4[questions_demo_all], as.character)
 
 clog_no_people_old <- data4 %>% filter(!is.na(CHECK_NAs_when_no_people)) %>% 
@@ -270,26 +311,23 @@ clog_no_people <- clog_no_people_old %>%
                                question.name %in% questions_nas_demo_cat ~ "yes"
                                )
          ) %>% 
-  filter(!old.value %in% new.value)
+  filter(!old.value %in% new.value) %>%
+  mutate(issue = "Logical inconsistencies between NAs in demographic disaggregation and people at center",
+         feedback	= NA,
+         changed = NA
+  ) %>%
+  select(uuid, index, question.name, issue, feedback, changed, old.value, new.value) %>%
+  print
 
 # merge cleaning log templates with logical issues
 
-clog_logical <- rbind(clog_gender, clog_items, clog_no_people)
+clog_logical <- rbind(clog_gender, clog_items, clog_no_people, clog_outliers)
 
 clog_logical <- clog_logical %>% filter(!paste0(index, "-/-", question.name) %in% clog_ids_no_change)
 
-clog_logical %>% write_xlsx(paste0("output/clog_logical_", Sys.Date(), ".xlsx"))
+clog_logical
 
-# export raw dataset with macro data checks
-checks <- data %>% select(CHECK_dup_uuid,
-                          CHECK_no_consent,
-                          CHECK_dup_center_id,
-                          CHECK_interview_duration, 
-                          index)
-
-data_checks <- left_join(raw_data, checks, by = "index")
-data_checks %>% 
-  write_xlsx(paste0("output/MDA_RAC_raw_data_with_macro_checks_", Sys.Date(), ".xlsx"))
+clog_logical %>% write_xlsx(paste0("output/MDA_RAC_logical_issues_and_outliers_", Sys.Date(), ".xlsx"))
 
 ### make modifications & additions to data
 
@@ -301,10 +339,16 @@ data[questions_int_no_age_gender][is.na(data[questions_int_no_age_gender])] <- 0
 # data[c(questions_cat, questions_text)][data[c(questions_cat, questions_text)]== "0"] <- NA_character_
 # data[questions_other][data[questions_other]== "0"] <- NA_character_
 
-# translate "other" responses 
-
-other_data_long <- pivot_longer_other(data, questions_other) %>% left_join(data[c("uuid", "index")], by ="index") %>% select(uuid, index, variable, original)
-notes_data_long <- pivot_longer_other(data, questions_note) %>% left_join(data[c("uuid", "index")], by ="index") %>% select(uuid, index, variable, original)
+# translate "other" responses and notes 
+translated_responses <- pivot_longer_other(data, c(questions_other, questions_note)) %>% 
+  left_join(data[c("uuid", "index")], by ="index") %>% 
+  rename(question.name = variable, old.value = original)  %>% 
+  mutate(issue = "Translation of text response", 
+         feedback = NA,
+         changed = NA
+         ) %>%
+  select(uuid, index, question.name, issue, feedback, changed, old.value) %>% 
+  filter(!paste0(index, "-/-", question.name) %in% clog_ids_all)
 
 # add authorization key from deepl api account
 my_key <- "5c72704c-1df8-72c3-3162-cb15d34de739:fx"
@@ -312,31 +356,23 @@ langs <- deeplr::available_languages2(my_key)
 as.data.frame(langs)
 deeplr::usage2(my_key)
 
-other_data_long$translation <- translate2(
-  text = other_data_long$original,
+translated_responses$new.value <- translate2(
+  text = translated_responses$old.value,
   source_lang = "RO",
   target_lang = "EN",
   auth_key = my_key
 )
 
-notes_data_long$translation <- translate2(
-  text = notes_data_long$original,
-  source_lang = "RO",
-  target_lang = "EN",
-  auth_key = my_key
-)
-
-other_data_long %>% write_xlsx(paste0("output/other_response_translations_", Sys.Date(), ".xlsx"))
-notes_data_long %>% write_xlsx(paste0("output/notes_translations_", Sys.Date(), ".xlsx"))
+translated_responses %>% write_xlsx(paste0("output/MDA_RAC_translations_other_resp_and_notes_", Sys.Date(), ".xlsx"))
 
 for (i in 1:nrow(data)) {
   for(c in 1:ncol(data)) {
   cname <- names(data[c])
-  if(cname %in% unique(other_data_long$variable))  {
-  m <- match(paste0(data$index[i], "/", cname) , paste0(other_data_long$index, "/", other_data_long$variable))
+  if(cname %in% unique(translated_responses$question.name))  {
+  m <- match(paste0(data$index[i], "/", cname) , paste0(translated_responses$index, "/", translated_responses$question.name))
   if(!is.na(m)){
     {
-      data[i,c] <- other_data_long$translation[m]
+      data[i,c] <- translated_responses$new.value[m]
     }
   }
   }
@@ -400,12 +436,17 @@ data <- data %>% mutate(set_na_gender = case_when(rowSums(across(all_of(c("how_m
 data[which(data$set_na_gender == "yes"), vars_gender] <- NA
 data[vars_gender]
 
+if("what_type_of_building_is_the_c" %in% names(data)) {
+
 # add building type when building type was already known before
 building_type <- read_xlsx("input/building_type.xlsx") %>% select(-label)
 building_type$centre_id <- as.character(building_type$centre_id )
 data <- left_join(data, building_type, by = "centre_id")
 data  <- data  %>% mutate(what_type_of_building_is_the_c = ifelse(is.na(what_type_of_building_is_the_c), what_type_of_building_is_the_c_new, what_type_of_building_is_the_c))
 data$centre_id[which(is.na(data$what_type_of_building_is_the_c))]
+data <- data %>% select(-c("what_type_of_building_is_the_c_new"))
+
+}
 
 # exclude data without consent or duplicated uuid
 data  <- data  %>% filter(consent == "yes")
@@ -413,8 +454,8 @@ data  <- data  %>% filter(consent == "yes")
 
 # exclude not needed variables
 vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "center_ind_breakdown_age", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18", "center_ind_breakdown_gender"))
-data_clean_for_sharing <- data %>% select(uuid, index, contains(all_of(vars_clean))) %>% select(-c(all_of(questions_sm_num), "what_type_of_building_is_the_c_new"))
-data_clean <- data %>% select(uuid, index, contains(all_of(vars_clean))) %>% select(-c("what_type_of_building_is_the_c_new"))
+data_clean_for_sharing <- data %>% select(uuid, index, contains(all_of(vars_clean))) %>% select(-c(all_of(questions_sm_num)))
+data_clean <- data %>% select(uuid, index, contains(all_of(vars_clean)))
 
 # export clean dataset without checks
 data_clean %>% write_xlsx(paste0("output/MDA_RAC_clean_data_unlabelled_", Sys.Date(), ".xlsx"))
