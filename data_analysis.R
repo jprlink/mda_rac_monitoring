@@ -23,7 +23,7 @@ survey <- read_xlsx("input/tool.xlsx") %>%
 choices <- read_xlsx("input/tool.xlsx", 2)
   
 # define question types
-questions_so <- survey$name[grepl("select_one", survey$type)]
+questions_so <- survey$name[grepl("select_one", survey$type)] %>% append(c("raion", "closure_time"))
 questions_so <- questions_so[!questions_so %in% "centre_id"]
 questions_sm <- survey$name[grepl("select_multiple", survey$type)]
 questions_text <- survey$name[grepl("text", survey$type)]

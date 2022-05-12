@@ -448,12 +448,34 @@ data <- data %>% select(-c("what_type_of_building_is_the_c_new"))
 
 }
 
+# add raion
+raion <- read_xlsx("input/raion.xlsx")
+raion$centre_id <- as.character(raion$centre_id )
+data <- left_join(data, raion, by = "centre_id")
+data  <- data  %>% 
+  mutate(closure_time = case_when(does_the_building_ha_in_the_next_3_months == "yes" ~ if_yes_in_how_much_to_its_previous_use,
+                                  does_the_building_ha_in_the_next_3_months %in% c("no","not_sure") ~ does_the_building_ha_in_the_next_3_months)
+)
+
+table(data$closure_time, useNA = "ifany")
+data$centre_id[is.na(data$raion)]
+
+df_closure <- data %>% 
+  group_by(raion, closure_time) %>% 
+  summarize(n = n()) %>%
+  pivot_wider(names_from = closure_time, values_from = n)
+
+df_closure_wide <- df_closure %>% as.data.frame() %>%
+  mutate(assessed_RACs = rowSums(.[-1], na.rm = T))
+
+df_closure_wide %>% write_xlsx(paste0("output/MDA_RAC_closure_time_", Sys.Date(), ".xlsx"))
+
 # exclude data without consent or duplicated uuid
 data  <- data  %>% filter(consent == "yes")
 #data <- data %>% filter(!duplicated(uuid))
 
 # exclude not needed variables
-vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "center_ind_breakdown_age", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18", "center_ind_breakdown_gender"))
+vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "center_ind_breakdown_age", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18", "center_ind_breakdown_gender", "raion", "closure_time"))
 data_clean_for_sharing <- data %>% select(uuid, index, contains(all_of(vars_clean))) %>% select(-c(all_of(questions_sm_num)))
 data_clean <- data %>% select(uuid, index, contains(all_of(vars_clean)))
 
