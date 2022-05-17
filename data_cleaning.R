@@ -1,4 +1,6 @@
 
+rm(list = ls())
+
 library(tidyverse)
 library(dplyr)
 library(lubridate)
@@ -405,36 +407,47 @@ data[vars_set_zero ][is.na(data[, vars_set_zero ])] <- 0
 data <- data %>% mutate(how_many_are_children_2_18_years_old = case_when(!is.na(child_2_6_number) ~ child_2_6_number + child_7_11_number + child_12_18_number,
                                                                           is.na(child_2_6_number)  ~ how_many_are_children_2_18_years_old),
                          )
-# add seperate total individual variable for breakdown
-data$center_ind_breakdown_age <- data$center_ind
 
 # set NAs for all three age variable when one of them is NA
-questions_nas_demo_num
 vars_age <- c("center_ind_breakdown_age", "child_0_2_number", "how_many_are_children_2_18_years_old", "demo_elderly")
 vars_age_all <- c("center_ind_breakdown_age", "child_0_2_number", "how_many_are_children_2_18_years_old", "demo_elderly", "child_2_6_number", "child_7_11_number", "child_12_18_number")
-data[vars_age_all]
-data <- data %>% mutate(set_na_age = case_when(rowSums(across(all_of(vars_age), ~ is.na(.))) > 0 ~"yes"))
-data[which(data$set_na_age == "yes"), vars_age_all] <- NA
-data[vars_age_all]
-
-# calculate percentages of demographic groups per center
-data <- data %>% mutate(perc_0_2 = child_0_2_number / center_ind,
-                        perc_2_18 = how_many_are_children_2_18_years_old / center_ind,
-                        perc_65_plus = demo_elderly / center_ind,
-                        perc_2_6 = ifelse(!is.na(child_2_6_number), child_2_6_number / how_many_are_children_2_18_years_old, NA),
-                        perc_7_11 = ifelse(!is.na(child_7_11_number), child_7_11_number / how_many_are_children_2_18_years_old, NA),
-                        perc_12_18 = ifelse(!is.na(child_12_18_number), child_12_18_number / how_many_are_children_2_18_years_old, NA)
+vars_age_breakdown <- c("center_ind_breakdown_age", "child_0_2_number_breakdown", "how_many_are_children_2_18_years_old_breakdown", "demo_elderly_breakdown", "child_2_6_number_breakdown", "child_7_11_number_breakdown", "child_12_18_number_breakdown")
+data <- data %>% mutate(center_ind_breakdown_age = center_ind,
+                        child_0_2_number_breakdown = child_0_2_number,
+                        demo_elderly_breakdown = demo_elderly,
+                        how_many_are_children_2_18_years_old_breakdown = how_many_are_children_2_18_years_old,
+                        child_2_6_number_breakdown = child_2_6_number,
+                        child_7_11_number_breakdown = child_7_11_number,
+                        child_12_18_number_breakdown = child_12_18_number
 )
 
-# add seperate total individual variable for breakdown of gender
-data$center_ind_breakdown_gender <- data$center_ind
+data[vars_age_breakdown]
+data <- data %>% mutate(set_na_age = case_when(rowSums(across(all_of(vars_age), ~ is.na(.))) > 0 ~"yes"))
+data[which(data$set_na_age == "yes"), vars_age_breakdown] <- NA
+data[vars_age_breakdown]
+
+# calculate percentages of demographic groups per center
+data <- data %>% mutate(perc_0_2 = child_0_2_number_breakdown / center_ind,
+                        perc_2_18 = how_many_are_children_2_18_years_old_breakdown / center_ind,
+                        perc_65_plus = demo_elderly_breakdown / center_ind,
+                        perc_2_6 = ifelse(!is.na(child_2_6_number_breakdown), child_2_6_number_breakdown / how_many_are_children_2_18_years_old_breakdown, NA),
+                        perc_7_11 = ifelse(!is.na(child_7_11_number_breakdown), child_7_11_number_breakdown / how_many_are_children_2_18_years_old_breakdown, NA),
+                        perc_12_18 = ifelse(!is.na(child_12_18_number_breakdown), child_12_18_number_breakdown / how_many_are_children_2_18_years_old_breakdown, NA)
+)
 
 # set NAs for all gender variables when one of them is NA
 vars_gender <- c("center_ind_breakdown_gender", "how_many_are_women", "how_many_are_men", "how_many_are_other")
-data[vars_gender]
+vars_gender_breakdown <- c("center_ind_breakdown_gender", "how_many_are_women_breakdown", "how_many_are_men_breakdown", "how_many_are_other_breakdown")
+data <- data %>% mutate(center_ind_breakdown_gender = center_ind,
+                        how_many_are_women_breakdown = how_many_are_women,
+                        how_many_are_men_breakdown = how_many_are_men,
+                        how_many_are_other_breakdown = how_many_are_other
+)
+                        
+data[vars_gender_breakdown]
 data <- data %>% mutate(set_na_gender = case_when(rowSums(across(all_of(c("how_many_are_women", "how_many_are_men")), ~ is.na(.))) > 0 ~"yes"))
-data[which(data$set_na_gender == "yes"), vars_gender] <- NA
-data[vars_gender]
+data[which(data$set_na_gender == "yes"), vars_gender_breakdown] <- NA
+data[vars_gender_breakdown]
 
 if("what_type_of_building_is_the_c" %in% names(data)) {
 
@@ -475,7 +488,7 @@ data  <- data  %>% filter(consent == "yes")
 #data <- data %>% filter(!duplicated(uuid))
 
 # exclude not needed variables
-vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", "center_ind_breakdown_age", "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18", "center_ind_breakdown_gender", "raion", "closure_time"))
+vars_clean <- survey$name[which(survey$clean_dataset == "yes")] %>% append(c("how_many_staff_per_people_hosted", vars_age_breakdown, "perc_0_2", "perc_2_18", "perc_65_plus", "perc_2_6", "perc_7_11", "perc_12_18", vars_gender_breakdown, "raion", "closure_time"))
 data_clean_for_sharing <- data %>% select(uuid, index, contains(all_of(vars_clean))) %>% select(-c(all_of(questions_sm_num)))
 data_clean <- data %>% select(uuid, index, contains(all_of(vars_clean)))
 

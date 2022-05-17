@@ -1,4 +1,5 @@
 
+rm(list = ls())
 
 library(tidyverse)
 library(dplyr)
@@ -29,10 +30,10 @@ questions_sm <- survey$name[grepl("select_multiple", survey$type)]
 questions_text <- survey$name[grepl("text", survey$type)]
 questions_int <- survey$name[grepl("integer", survey$type)] %>% append(c("calc_ukrainian","calc_third_party",
                                                                          "how_many_staff_per_people_hosted", "center_ind_breakdown_age",
-                                                                         "center_ind_breakdown_gender",
-                                                                         "perc_0_2",	"perc_2_18",	"perc_65_plus",	
-                                                                         "perc_2_6",	"perc_7_11",	"perc_12_18"
-                                                                         ))
+                                                                         "center_ind_breakdown_age", "child_0_2_number_breakdown", "how_many_are_children_2_18_years_old_breakdown", "demo_elderly_breakdown", "child_2_6_number_breakdown", "child_7_11_number_breakdown", "child_12_18_number_breakdown",
+                                                                         "perc_0_2",	"perc_2_18",	"perc_65_plus",	"perc_2_6",	"perc_7_11",	"perc_12_18",
+                                                                         "center_ind_breakdown_gender", "how_many_are_women_breakdown", "how_many_are_men_breakdown", "how_many_are_other_breakdown"
+                                                                         )) %>% unique()
 questions_cat <- append(questions_so, questions_sm)
 questions_other <- grep("_specify|_explain_why|_other", names(data), value = T)
 questions_other <- questions_other[!questions_other %in% c(questions_int, questions_cat)]
@@ -110,21 +111,37 @@ results_sum <- results_sum_wide %>% pivot_longer(everything(),
 
 # add age and gender breakdown
 age_total <- sum(data$center_ind_breakdown_age, na.rm = T)
-vars_age <- c("child_0_2_number", "how_many_are_children_2_18_years_old", "demo_elderly")
+vars_age <- c("child_0_2_number_breakdown", "how_many_are_children_2_18_years_old_breakdown", "demo_elderly_breakdown")
 results_age <- results_sum %>% filter(id %in% vars_age) %>% 
   mutate(Result =  Result / age_total,
          Type = "select_one")
 
 adult_results <- 1 - sum(results_age$Result)
-results_age[4,"id"] <-  "adults_number"
+results_age[4,"id"] <-  "adults_number_breakdown"
 results_age[4,"Result"] <-  adult_results
 results_age[4,"Type"] <- "select_one"
 
 gender_total <- sum(data$center_ind_breakdown_gender, na.rm = T)
-vars_gender <- c("how_many_are_women", "how_many_are_men", "how_many_are_other")
+vars_gender <- c("how_many_are_women_breakdown", "how_many_are_men_breakdown", "how_many_are_other_breakdown")
 results_gender <- results_sum %>% filter(id %in% vars_gender) %>% 
   mutate(Result =  Result / gender_total ,
         Type = "select_one")
+
+# exclude sums for temporal age variable from results
+vars_exclude <- c("center_ind_breakdown_age",
+                  "child_0_2_number_breakdown",
+                  "how_many_are_children_2_18_years_old_breakdown",
+                  "demo_elderly_breakdown",
+                  "child_2_6_number_breakdown",
+                  "child_7_11_number_breakdown",
+                  "child_12_18_number_breakdown",
+                  "center_ind_breakdown_gender",
+                  "how_many_are_women_breakdown",
+                  "how_many_are_men_breakdown",
+                  "how_many_are_other_breakdown")
+
+results_sum <- results_sum %>% 
+  filter(!id %in% vars_exclude)
 
 # merge all results
 results_all <- rbind(results_so,
